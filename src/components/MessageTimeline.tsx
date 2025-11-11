@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
-import { Smile, Reply, Lock, LockOpen, ShieldAlert, Upload } from 'lucide-react';
+import { Smile, Reply, Lock, LockOpen, ShieldAlert, Upload, Video, Trash2 } from 'lucide-react';
 import { MatrixEvent } from 'matrix-js-sdk';
 
 const MessageTimeline: React.FC = () => {
-  const { currentRoom, client, sendReaction, loadMoreHistory } = useMatrix();
+  const { currentRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
   const [messages, setMessages] = useState<MatrixEvent[]>([]);
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -39,6 +39,243 @@ const MessageTimeline: React.FC = () => {
   
   // Flatten all emojis for easy access
   const allEmojis = Object.values(emojiCategories).flat();
+
+  // Parse message for user mentions and render as pills
+  const renderMessageWithMentions = (text: string) => {
+    if (!currentRoom) return text;
+    
+    // Match Matrix.to user links: https://matrix.to/#/@user:homeserver
+    const matrixLinkRegex = /https:\/\/matrix\.to\/#\/(@[a-zA-Z0-9._=\-]+:[a-zA-Z0-9.\-]+)/g;
+    // Also match plain @username patterns for backwards compatibility
+    const plainMentionRegex = /@([a-zA-Z0-9.\-_\s]+?)(?=\s|$|[.,!?;:])/g;
+    
+    const parts = [];
+    let lastIndex = 0;
+    
+    // First, process Matrix.to links
+    let match;
+    const processedRanges: Array<{start: number, end: number}> = [];
+    
+    while ((match = matrixLinkRegex.exec(text)) !== null) {
+      const userId = match[1];
+      const matchStart = match.index;
+      const matchEnd = match.index + match[0].length;
+      
+      // Add text before mention
+      if (matchStart > lastIndex) {
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {text.substring(lastIndex, matchStart)}
+          </span>
+        );
+      }
+      
+      // Find the user in the room
+      const members = currentRoom.getJoinedMembers();
+      const mentionedUser = members.find(member => member.userId === userId);
+      const displayName = mentionedUser?.name || userId.split(':')[0].substring(1);
+      
+      // Render mention as clickable pill link
+      parts.push(
+        <a
+          key={`mention-${matchStart}`}
+          href={match[0]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition font-medium no-underline"
+          title={userId}
+          onClick={(e) => {
+            e.stopPropagation();
+            console.log('Clicked user:', userId);
+          }}
+        >
+          @{displayName}
+        </a>
+      );
+      
+      processedRanges.push({ start: matchStart, end: matchEnd });
+      lastIndex = matchEnd;
+    }
+    
+    // Reset for second pass (plain mentions)
+    plainMentionRegex.lastIndex = 0;
+    
+    // Process plain @mentions that weren't already covered by Matrix.to links
+    const textSegments = text.split('');
+    let currentText = '';
+    let currentStart = lastIndex === 0 ? 0 : lastIndex;
+    
+    // If we processed Matrix.to links, handle remaining text
+    if (processedRanges.length > 0) {
+      // Add remaining text after last Matrix.to link
+      if (lastIndex < text.length) {
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {text.substring(lastIndex)}
+          </span>
+        );
+      }
+      return parts.length > 0 ? parts : text;
+    }
+    
+    // No Matrix.to links found, process plain mentions
+    while ((match = plainMentionRegex.exec(text)) !== null) {
+      const mentionedName = match[1];
+      const matchStart = match.index;
+      const matchEnd = match.index + match[0].length;
+      
+      // Add text before mention
+      if (matchStart > lastIndex) {
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {text.substring(lastIndex, matchStart)}
+          </span>
+        );
+      }
+      
+      // Find the user in the room
+      const members = currentRoom.getJoinedMembers();
+      const mentionedUser = members.find(member => 
+        member.name === mentionedName || 
+        member.userId === `@${mentionedName}` ||
+        member.userId.toLowerCase().includes(mentionedName.toLowerCase())
+      );
+      
+      // Render mention as pill (non-link for plain mentions)
+      parts.push(
+        <span
+          key={`mention-${matchStart}`}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition cursor-pointer font-medium"
+          title={mentionedUser?.userId || `@${mentionedName}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (mentionedUser) {
+              console.log('Clicked user:', mentionedUser.userId);
+            }
+          }}
+        >
+          @{mentionedName}
+        </span>
+      );
+      
+      lastIndex = matchEnd;
+    }
+    
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(
+        <span key={`text-${lastIndex}`}>
+          {text.substring(lastIndex)}
+        </span>
+      );
+    }
+    
+    return parts.length > 0 ? parts : text;
+  };
+
+  // Check if the current room has Element Call enabled
+  const isElementCallRoom = () => {
+    if (!currentRoom) return false;
+    
+    // Check for Element Call room type (org.matrix.msc3401.call or io.element.call)
+    const createEvent = currentRoom.currentState.getStateEvents('m.room.create', '');
+    const roomType = createEvent?.getContent()?.type;
+    if (roomType === 'org.matrix.msc3401.call' || roomType === 'io.element.call') {
+      return true;
+    }
+    
+    // Check for Element Call widget state events (multiple possible event types)
+    const widgetEventTypes = [
+      'im.vector.modular.widgets',
+      'io.element.widgets.layout',
+      'm.widgets'
+    ];
+    
+    for (const eventType of widgetEventTypes) {
+      const widgetEvents = currentRoom.currentState.getStateEvents(eventType);
+      if (widgetEvents && widgetEvents.length > 0) {
+        // Check if any widget is an Element Call widget
+        for (const event of widgetEvents) {
+          const content = event.getContent();
+          const url = content?.url || '';
+          const type = content?.type || '';
+          
+          if (url.includes('element.io/call') || 
+              url.includes('call.element.io') ||
+              type === 'jitsi' ||
+              type === 'io.element.call') {
+            return true;
+          }
+        }
+      }
+    }
+    
+    // Check room name for common video call patterns (fallback)
+    const roomName = currentRoom.name?.toLowerCase() || '';
+    if (roomName.includes('video room') || 
+        roomName.includes('video call') || 
+        roomName.includes('call room')) {
+      return true;
+    }
+    
+    return false;
+  };
+
+  // Join Element Call
+  const joinElementCall = () => {
+    if (!currentRoom || !client) return;
+    
+    const roomId = currentRoom.roomId;
+    const homeserver = client.getHomeserverUrl();
+    const accessToken = client.getAccessToken();
+    const userId = client.getUserId();
+    
+    // First check if there's a specific Element Call widget URL in the room
+    const widgetEvents = currentRoom.currentState.getStateEvents('im.vector.modular.widgets');
+    let widgetUrl = '';
+    
+    if (widgetEvents && widgetEvents.length > 0) {
+      for (const event of widgetEvents) {
+        const content = event.getContent();
+        const url = content?.url || '';
+        if (url.includes('element.io/call') || url.includes('call.element.io')) {
+          widgetUrl = url;
+          break;
+        }
+      }
+    }
+    
+    // Use widget URL if available, otherwise construct Element Call URL
+    let callUrl = widgetUrl || `https://call.element.io/room/#/${roomId}`;
+    
+    // Add authentication parameters to allow seamless join
+    const url = new URL(callUrl);
+    if (homeserver) {
+      url.searchParams.set('homeserver', homeserver);
+    }
+    if (accessToken) {
+      url.searchParams.set('accessToken', accessToken);
+    }
+    if (userId) {
+      url.searchParams.set('userId', userId);
+    }
+    
+    const finalUrl = url.toString();
+    console.log('🎥 Opening Element Call for room:', currentRoom.name);
+    console.log('🎥 Room ID:', roomId);
+    console.log('🎥 Call URL:', finalUrl.replace(accessToken || '', '[REDACTED]'));
+    
+    // Open in new window/tab with appropriate features for a call window
+    const callWindow = window.open(
+      finalUrl,
+      `element-call-${roomId}`,
+      'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no'
+    );
+    
+    if (!callWindow) {
+      alert('Pop-up blocked! Please allow pop-ups for this site to join video calls.');
+    }
+  };
 
   // Load custom emojis from localStorage on mount
   useEffect(() => {
@@ -228,6 +465,21 @@ const MessageTimeline: React.FC = () => {
     }
   };
 
+  const handleDeleteMessage = async (eventId: string) => {
+    if (!currentRoom || !client) return;
+    
+    if (!confirm('Are you sure you want to delete this message?')) {
+      return;
+    }
+    
+    try {
+      await deleteMessage(currentRoom.roomId, eventId);
+    } catch (error) {
+      console.error('Failed to delete message:', error);
+      alert('Failed to delete message. Please try again.');
+    }
+  };
+
   const getReactions = (event: MatrixEvent) => {
     if (!currentRoom) return {};
     
@@ -301,23 +553,46 @@ const MessageTimeline: React.FC = () => {
   }
 
   const isRoomEncrypted = currentRoom?.hasEncryptionStateEvent();
+  const hasElementCall = isElementCallRoom();
 
   return (
     <div className="flex-1 flex flex-col bg-slate-900 min-h-0">
       {/* Room header */}
       <div className="bg-slate-800 border-b border-slate-700 px-6 py-4 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-xl font-bold text-white">{currentRoom.name}</h2>
-          {isRoomEncrypted && (
-            <div className="flex items-center gap-1 text-green-400" title="End-to-end encrypted">
-              <Lock className="w-4 h-4" />
-              <span className="text-xs">Encrypted</span>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-white">{currentRoom.name}</h2>
+              {isRoomEncrypted && (
+                <div className="flex items-center gap-1 text-green-400" title="End-to-end encrypted">
+                  <Lock className="w-4 h-4" />
+                  <span className="text-xs">Encrypted</span>
+                </div>
+              )}
+              {hasElementCall && (
+                <div className="flex items-center gap-1 text-blue-400" title="Video call available">
+                  <Video className="w-4 h-4" />
+                  <span className="text-xs">Call Available</span>
+                </div>
+              )}
             </div>
+            <p className="text-sm text-slate-400">
+              {currentRoom.getJoinedMemberCount()} members
+            </p>
+          </div>
+          
+          {/* Join Call button */}
+          {hasElementCall && (
+            <button
+              onClick={joinElementCall}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2 font-medium"
+              title="Join video call"
+            >
+              <Video className="w-5 h-5" />
+              Join Call
+            </button>
           )}
         </div>
-        <p className="text-sm text-slate-400">
-          {currentRoom.getJoinedMemberCount()} members
-        </p>
       </div>
 
       {/* Messages */}
@@ -358,6 +633,7 @@ const MessageTimeline: React.FC = () => {
             const isOwn = sender === client?.getUserId();
             const isEncrypted = event.isEncrypted();
             const isDecryptionFailure = event.isDecryptionFailure();
+            const isRedacted = event.isRedacted();
 
             return (
               <div
@@ -388,16 +664,21 @@ const MessageTimeline: React.FC = () => {
                             : 'bg-slate-800 text-slate-100 rounded-bl-sm'
                         }`}
                       >
-                        {isDecryptionFailure ? (
+                        {isRedacted ? (
+                          <div className="flex items-center gap-2 text-slate-500 italic">
+                            <Trash2 className="w-4 h-4" />
+                            <span className="text-sm">Message deleted</span>
+                          </div>
+                        ) : isDecryptionFailure ? (
                           <div className="flex items-center gap-2 text-red-400">
                             <ShieldAlert className="w-4 h-4" />
                             <span className="text-sm">Unable to decrypt message</span>
                           </div>
                         ) : (
                           <>
-                            <ReactMarkdown className="markdown-body">
-                              {content.body || ''}
-                            </ReactMarkdown>
+                            <div className="markdown-body">
+                              {renderMessageWithMentions(content.body || '')}
+                            </div>
                             {isEncrypted && (
                               <div className="flex items-center gap-1 mt-1 text-xs opacity-50">
                                 <Lock className="w-3 h-3" />
@@ -408,9 +689,9 @@ const MessageTimeline: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Reaction button */}
+                      {/* Message actions (reaction, delete) */}
                       {hoveredMessage === eventId && (
-                        <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 transition">
+                        <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 transition flex gap-1">
                           <button
                             onClick={() => {
                               if (showEmojiPicker === eventId) {
@@ -425,6 +706,17 @@ const MessageTimeline: React.FC = () => {
                           >
                             <Smile className="w-4 h-4" />
                           </button>
+                          
+                          {/* Delete button - only for own messages */}
+                          {isOwn && (
+                            <button
+                              onClick={() => handleDeleteMessage(eventId)}
+                              className="bg-slate-700 hover:bg-red-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
+                              title="Delete message"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       )}
                       

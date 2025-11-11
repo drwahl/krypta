@@ -11,6 +11,7 @@ export interface MatrixContextType {
   spaces: Room[];
   sendMessage: (roomId: string, message: string) => Promise<void>;
   sendReaction: (roomId: string, eventId: string, emoji: string) => Promise<void>;
+  deleteMessage: (roomId: string, eventId: string) => Promise<void>;
   loadMoreHistory: (room: Room) => Promise<boolean>;
   needsVerification: boolean;
   verificationRequest: any | null;

@@ -80,3 +80,12 @@ body {
   text-decoration: underline;
 }
 
+/* Matrix mention pills - ensure no underline and proper styling */
+a[href*="matrix.to/#/@"] {
+  text-decoration: none !important;
+}
+
+a[href*="matrix.to/#/@"]:hover {
+  text-decoration: none !important;
+}
+

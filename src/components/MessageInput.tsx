@@ -2,12 +2,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { Send, Paperclip, Smile } from 'lucide-react';
 
+interface UserSuggestion {
+  userId: string;
+  displayName: string;
+}
+
 const MessageInput: React.FC = () => {
   const { currentRoom, sendMessage, client } = useMatrix();
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [userSuggestions, setUserSuggestions] = useState<UserSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [mentionStart, setMentionStart] = useState<number>(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -15,6 +24,91 @@ const MessageInput: React.FC = () => {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [message]);
+
+  // Get room members for autocomplete
+  const getRoomMembers = (): UserSuggestion[] => {
+    if (!currentRoom) return [];
+    
+    const members = currentRoom.getJoinedMembers();
+    return members.map(member => ({
+      userId: member.userId,
+      displayName: member.name || member.userId
+    }));
+  };
+
+  // Check for mention trigger and show suggestions
+  const checkForMention = (text: string, cursorPos: number) => {
+    // Find the last @ before cursor
+    const beforeCursor = text.substring(0, cursorPos);
+    const lastAtIndex = beforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex === -1) {
+      setUserSuggestions([]);
+      setMentionStart(-1);
+      return;
+    }
+    
+    // Check if @ is at start or has whitespace before it
+    const isValidStart = lastAtIndex === 0 || /\s/.test(text[lastAtIndex - 1]);
+    if (!isValidStart) {
+      setUserSuggestions([]);
+      setMentionStart(-1);
+      return;
+    }
+    
+    // Get the search query after @
+    const searchQuery = beforeCursor.substring(lastAtIndex + 1).toLowerCase();
+    
+    // Check if there's a space after @ (invalid mention)
+    if (searchQuery.includes(' ')) {
+      setUserSuggestions([]);
+      setMentionStart(-1);
+      return;
+    }
+    
+    // Filter members by search query
+    const members = getRoomMembers();
+    const filtered = members.filter(member => 
+      member.displayName.toLowerCase().includes(searchQuery) ||
+      member.userId.toLowerCase().includes(searchQuery)
+    );
+    
+    if (filtered.length > 0) {
+      setUserSuggestions(filtered);
+      setMentionStart(lastAtIndex);
+      setSelectedSuggestionIndex(0);
+    } else {
+      setUserSuggestions([]);
+      setMentionStart(-1);
+    }
+  };
+
+  // Insert mention into message
+  const insertMention = (user: UserSuggestion) => {
+    if (mentionStart === -1 || !textareaRef.current) return;
+    
+    const cursorPos = textareaRef.current.selectionStart;
+    const beforeMention = message.substring(0, mentionStart);
+    const afterMention = message.substring(cursorPos);
+    
+    // Use friendly @displayname format for typing (will be converted to Matrix.to link on send)
+    const mentionText = `@${user.displayName}`;
+    const newMessage = beforeMention + mentionText + ' ' + afterMention;
+    const newCursorPos = beforeMention.length + mentionText.length + 1;
+    
+    setMessage(newMessage);
+    setUserSuggestions([]);
+    setMentionStart(-1);
+    
+    // Restore cursor position
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = newCursorPos;
+        textareaRef.current.selectionEnd = newCursorPos;
+        textareaRef.current.focus();
+      }
+    }, 0);
+  };
 
   const handleTyping = () => {
     if (!currentRoom || !client) return;
@@ -62,6 +156,50 @@ const MessageInput: React.FC = () => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle autocomplete navigation
+    if (userSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => 
+          prev < userSuggestions.length - 1 ? prev + 1 : 0
+        );
+        return;
+      }
+      
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => 
+          prev > 0 ? prev - 1 : userSuggestions.length - 1
+        );
+        return;
+      }
+      
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        insertMention(userSuggestions[selectedSuggestionIndex]);
+        return;
+      }
+      
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setUserSuggestions([]);
+        setMentionStart(-1);
+        return;
+      }
+    }
+    
+    // Handle Tab for mention completion even without dropdown
+    if (e.key === 'Tab' && textareaRef.current) {
+      const cursorPos = textareaRef.current.selectionStart;
+      checkForMention(message, cursorPos);
+      
+      if (userSuggestions.length > 0) {
+        e.preventDefault();
+        return;
+      }
+    }
+    
+    // Handle Enter to send
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -73,7 +211,34 @@ const MessageInput: React.FC = () => {
   }
 
   return (
-    <div className="bg-slate-800 border-t border-slate-700 p-4 flex-shrink-0">
+    <div className="bg-slate-800 border-t border-slate-700 p-4 flex-shrink-0 relative">
+      {/* User mention autocomplete dropdown */}
+      {userSuggestions.length > 0 && (
+        <div 
+          ref={suggestionsRef}
+          className="absolute bottom-full left-4 right-4 mb-2 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl max-h-64 overflow-y-auto z-50"
+        >
+          {userSuggestions.map((user, index) => (
+            <button
+              key={user.userId}
+              type="button"
+              onClick={() => insertMention(user)}
+              className={`w-full px-4 py-2 text-left hover:bg-slate-700 transition flex items-center gap-3 ${
+                index === selectedSuggestionIndex ? 'bg-slate-700' : ''
+              }`}
+            >
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+                {user.displayName.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-white font-medium truncate">{user.displayName}</div>
+                <div className="text-slate-400 text-xs truncate">{user.userId}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      
       <form onSubmit={handleSubmit} className="flex items-end gap-3">
         <button
           type="button"
@@ -90,8 +255,21 @@ const MessageInput: React.FC = () => {
             onChange={(e) => {
               setMessage(e.target.value);
               handleTyping();
+              
+              // Check for mentions on input change
+              if (textareaRef.current) {
+                const cursorPos = textareaRef.current.selectionStart;
+                checkForMention(e.target.value, cursorPos);
+              }
             }}
             onKeyDown={handleKeyDown}
+            onBlur={() => {
+              // Delay hiding suggestions to allow click events to fire
+              setTimeout(() => {
+                setUserSuggestions([]);
+                setMentionStart(-1);
+              }, 200);
+            }}
             placeholder={`Message ${currentRoom.name}`}
             className="w-full px-4 py-3 bg-transparent text-white placeholder-slate-500 focus:outline-none resize-none"
             rows={1}
@@ -118,7 +296,7 @@ const MessageInput: React.FC = () => {
       </form>
 
       <div className="mt-2 text-xs text-slate-500">
-        <span className="font-medium">Shift + Enter</span> for new line • <span className="font-medium">Enter</span> to send • Markdown supported
+        <span className="font-medium">@username</span> to mention • <span className="font-medium">Tab</span> to autocomplete • <span className="font-medium">Shift + Enter</span> for new line • <span className="font-medium">Enter</span> to send
       </div>
     </div>
   );
