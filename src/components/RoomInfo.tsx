@@ -1,10 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import { Room, MatrixClient, MatrixEvent, RoomMember } from 'matrix-js-sdk';
-import { X, Users, Pin, Lock, Globe, UserPlus, Search, Shield, Crown, MoreVertical, Bell, BellOff } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Room, MatrixEvent, RoomMember } from 'matrix-js-sdk';
+import { X, Users, Pin, Lock, Globe, UserPlus, Search, Shield, Crown, Bell, BellOff, Palette, PlusCircle, UploadCloud, Loader2 } from 'lucide-react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { format } from 'date-fns';
+import { Theme } from '../themeTypes';
+
+const THEME_DEFAULT_EVENT_TYPE = 'com.nychatt.theme.default';
+
+const parseThemeFromJson = (value: any, fallbackName: string): Theme | null => {
+  if (!value || typeof value !== 'object') return null;
+
+  const { colors, fonts, spacing, sizing, style } = value;
+  if (!colors || !fonts || !spacing || !sizing || !style) {
+    return null;
+  }
+
+  const name = typeof value.name === 'string' ? value.name : fallbackName;
+  const displayName = typeof value.displayName === 'string' ? value.displayName : name;
+
+  return {
+    name,
+    displayName,
+    colors,
+    fonts,
+    spacing,
+    sizing,
+    style,
+  };
+};
 
 interface RoomInfoProps {
   room: Room;
@@ -12,8 +37,30 @@ interface RoomInfoProps {
 }
 
 const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
-  const { client, getParentSpace } = useMatrix();
-  const { theme, availableThemes, getRoomTheme, setRoomTheme, clearRoomTheme, getSpaceTheme, setSpaceTheme, clearSpaceTheme, defaultThemeName, currentSpaceId } = useTheme();
+  const {
+    client,
+    getParentSpace,
+    roomThemeDefaults,
+    themeDefinitions,
+    setRoomServerThemeDefault,
+    clearRoomServerThemeDefault,
+    upsertThemeDefinition,
+    deleteThemeDefinition,
+  } = useMatrix();
+  const {
+    theme,
+    availableThemes,
+    getRoomTheme,
+    setRoomTheme,
+    clearRoomTheme,
+    getSpaceTheme,
+    setSpaceTheme,
+    clearSpaceTheme,
+    defaultThemeName,
+    getRoomThemeObject,
+    resolveTheme,
+    allThemes,
+  } = useTheme();
   const { settings, isRoomMuted, toggleRoomMute, toggleRoomAllow } = useNotifications();
   const [activeTab, setActiveTab] = useState<'members' | 'pinned' | 'settings'>('members');
   const [members, setMembers] = useState<RoomMember[]>([]);
@@ -22,6 +69,28 @@ const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
   const [inviteUsername, setInviteUsername] = useState('');
   const [isInviting, setIsInviting] = useState(false);
   const [showInviteForm, setShowInviteForm] = useState(false);
+  const parentSpaceId = getParentSpace(room.roomId);
+  const sortedThemes = useMemo(
+    () => [...availableThemes].sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    [availableThemes]
+  );
+  const serverRoomDefault = roomThemeDefaults[room.roomId];
+  const roomDefinitions = themeDefinitions[room.roomId] || {};
+  const definitionEntries = useMemo(
+    () => Object.values(roomDefinitions).sort((a, b) => a.theme.displayName.localeCompare(b.theme.displayName)),
+    [roomDefinitions]
+  );
+  const [defaultThemeSelection, setDefaultThemeSelection] = useState<string>('');
+  const [defaultApply, setDefaultApply] = useState(true);
+  const [defaultStatus, setDefaultStatus] = useState<string | null>(null);
+  const [defaultSaving, setDefaultSaving] = useState(false);
+  const [definitionThemeId, setDefinitionThemeId] = useState('');
+  const [definitionDisplayName, setDefinitionDisplayName] = useState('');
+  const [definitionDescription, setDefinitionDescription] = useState('');
+  const [definitionBaseTheme, setDefinitionBaseTheme] = useState('terminal');
+  const [definitionJson, setDefinitionJson] = useState('');
+  const [definitionStatus, setDefinitionStatus] = useState<string | null>(null);
+  const [definitionSaving, setDefinitionSaving] = useState(false);
 
   const isEncrypted = room.hasEncryptionStateEvent();
   const joinRule = room.getJoinRule();
@@ -34,6 +103,146 @@ const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
   const myPowerLevel = powerLevels?.users?.[userId || ''] || powerLevels?.users_default || 0;
   const canPin = myPowerLevel >= (powerLevels?.events?.['m.room.pinned_events'] || 50);
   const canInvite = myPowerLevel >= (powerLevels?.invite || 0);
+  const themeEventThreshold = powerLevels?.events?.[THEME_DEFAULT_EVENT_TYPE] ?? powerLevels?.state_default ?? 50;
+  const canManageThemes = myPowerLevel >= themeEventThreshold;
+  const roomOverride = getRoomTheme(room.roomId);
+  const spaceOverride = parentSpaceId ? getSpaceTheme(parentSpaceId) : null;
+  const effectiveTheme = useMemo(
+    () => getRoomThemeObject(room.roomId, parentSpaceId),
+    [getRoomThemeObject, room.roomId, parentSpaceId]
+  );
+  const globalThemeDisplay = resolveTheme(defaultThemeName).displayName;
+
+  useEffect(() => {
+    if (serverRoomDefault) {
+      setDefaultThemeSelection(serverRoomDefault.themeId);
+      setDefaultApply(serverRoomDefault.applyToNewUsers !== false);
+    } else {
+      setDefaultThemeSelection('');
+      setDefaultApply(true);
+    }
+    setDefaultStatus(null);
+  }, [serverRoomDefault]);
+
+  const handleBaseThemeSelect = (value: string) => {
+    setDefinitionBaseTheme(value);
+    const baseTheme = allThemes[value];
+    if (baseTheme) {
+      setDefinitionJson(JSON.stringify(baseTheme, null, 2));
+      setDefinitionDisplayName(baseTheme.displayName);
+      setDefinitionThemeId((prev) => (prev ? prev : `${value}-custom`));
+    }
+    setDefinitionStatus(null);
+  };
+
+  const handleSaveRoomDefault = async () => {
+    if (!canManageThemes || !defaultThemeSelection) return;
+    setDefaultSaving(true);
+    setDefaultStatus(null);
+    try {
+      await setRoomServerThemeDefault(room.roomId, defaultThemeSelection, { applyToNewUsers: defaultApply });
+      setDefaultStatus('Server default updated.');
+    } catch (error: any) {
+      setDefaultStatus(`Failed to update default: ${error?.message || String(error)}`);
+    } finally {
+      setDefaultSaving(false);
+    }
+  };
+
+  const handleClearRoomDefault = async () => {
+    if (!canManageThemes) return;
+    setDefaultSaving(true);
+    setDefaultStatus(null);
+    try {
+      await clearRoomServerThemeDefault(room.roomId);
+      setDefaultStatus('Server default cleared.');
+    } catch (error: any) {
+      setDefaultStatus(`Failed to clear default: ${error?.message || String(error)}`);
+    } finally {
+      setDefaultSaving(false);
+    }
+  };
+
+  const handlePublishTheme = async () => {
+    if (!canManageThemes) return;
+    setDefinitionSaving(true);
+    setDefinitionStatus(null);
+    try {
+      const trimmedId = definitionThemeId.trim();
+      if (!trimmedId) {
+        setDefinitionStatus('Theme ID is required.');
+        setDefinitionSaving(false);
+        return;
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(definitionJson);
+      } catch (error: any) {
+        setDefinitionStatus(`Invalid JSON: ${error?.message || String(error)}`);
+        setDefinitionSaving(false);
+        return;
+      }
+      const themeFromJson = parseThemeFromJson(parsed, trimmedId);
+      if (!themeFromJson) {
+        setDefinitionStatus('Theme JSON is missing required fields.');
+        setDefinitionSaving(false);
+        return;
+      }
+      const normalizedTheme: Theme = {
+        ...themeFromJson,
+        name: trimmedId,
+        displayName: definitionDisplayName.trim() || themeFromJson.displayName || trimmedId,
+      };
+      await upsertThemeDefinition(
+        room.roomId,
+        normalizedTheme.name,
+        normalizedTheme,
+        definitionDescription.trim()
+          ? { description: definitionDescription.trim() }
+          : undefined
+      );
+      setDefinitionStatus('Theme published successfully.');
+    } catch (error: any) {
+      setDefinitionStatus(`Failed to publish theme: ${error?.message || String(error)}`);
+    } finally {
+      setDefinitionSaving(false);
+    }
+  };
+
+  const handleApplyDefinition = (themeName: string) => {
+    setRoomTheme(room.roomId, themeName);
+    setDefinitionStatus(`Applied ${resolveTheme(themeName).displayName} locally.`);
+  };
+
+  const handleSetDefinitionAsDefault = async (themeName: string) => {
+    if (!canManageThemes) return;
+    setDefaultSaving(true);
+    setDefaultStatus(null);
+    try {
+      await setRoomServerThemeDefault(room.roomId, themeName, { applyToNewUsers: true });
+      setDefaultThemeSelection(themeName);
+      setDefaultApply(true);
+      setDefaultStatus('Server default updated.');
+    } catch (error: any) {
+      setDefaultStatus(`Failed to update default: ${error?.message || String(error)}`);
+    } finally {
+      setDefaultSaving(false);
+    }
+  };
+
+  const handleDeleteDefinition = async (stateKey: string) => {
+    if (!canManageThemes) return;
+    setDefinitionSaving(true);
+    setDefinitionStatus(null);
+    try {
+      await deleteThemeDefinition(room.roomId, stateKey);
+      setDefinitionStatus('Theme removed.');
+    } catch (error: any) {
+      setDefinitionStatus(`Failed to remove theme: ${error?.message || String(error)}`);
+    } finally {
+      setDefinitionSaving(false);
+    }
+  };
 
   // Load members
   useEffect(() => {
@@ -619,114 +828,90 @@ const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
             <div>
               <h4 className="font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Room Theme</h4>
               <p className="mb-3 text-xs" style={{ color: 'var(--color-textMuted)' }}>
-                Room theme → Space theme → Global default (affects only this chat window, not the UI chrome)
+                Resolution order: your room override → room server default → space override → global default.
               </p>
-              
-              {/* Show current hierarchy */}
-              {(() => {
-                const roomOverride = getRoomTheme(room.roomId);
-                const spaceId = getParentSpace(room.roomId);
-                const spaceOverride = spaceId ? getSpaceTheme(spaceId) : null;
-                const effectiveTheme = roomOverride || spaceOverride || defaultThemeName;
-                const effectiveThemeDisplay = availableThemes.find(t => t.name === effectiveTheme)?.displayName || 'Unknown';
-                
-                return (
-                  <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--color-bgTertiary)', fontSize: 'var(--sizing-textSm)' }}>
-                    <div className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>
-                      Current: {effectiveThemeDisplay}
-                    </div>
-                    <div className="space-y-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
-                      <div>• Global: {availableThemes.find(t => t.name === defaultThemeName)?.displayName}</div>
-                      {spaceId && (
-                        <div>• Space: {spaceOverride ? availableThemes.find(t => t.name === spaceOverride)?.displayName : '(using global)'}</div>
-                      )}
-                      <div>• Room: {roomOverride ? availableThemes.find(t => t.name === roomOverride)?.displayName : '(using ' + (spaceOverride ? 'space' : 'global') + ')'}</div>
-                    </div>
-                  </div>
-                );
-              })()}
-              
-              {/* Room Theme Section */}
-              <div className="mb-4">
-                <h5 className="font-semibold mb-2 text-sm" style={{ color: 'var(--color-text)' }}>Room Theme Override</h5>
-                <div className="space-y-2">
-                  {/* Default/inherit option */}
-                  <button
-                    onClick={() => clearRoomTheme(room.roomId)}
-                    className="w-full px-3 py-2 rounded text-left transition"
-                    style={{
-                      backgroundColor: !getRoomTheme(room.roomId) ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
-                      color: !getRoomTheme(room.roomId) ? '#fff' : 'var(--color-textSecondary)',
-                      fontSize: 'var(--sizing-textSm)',
-                    }}
-                  >
-                    <div className="font-medium">Use Parent Theme</div>
-                    <div className="text-xs opacity-75">
-                      {(() => {
-                        const spaceId = getParentSpace(room.roomId);
-                        const spaceOverride = spaceId ? getSpaceTheme(spaceId) : null;
-                        return spaceOverride 
-                          ? availableThemes.find(t => t.name === spaceOverride)?.displayName 
-                          : availableThemes.find(t => t.name === defaultThemeName)?.displayName;
-                      })()}
-                    </div>
-                  </button>
+              <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--color-bgTertiary)' }}>
+                <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--color-text)' }}>
+                  <Palette className="w-4 h-4" />
+                  <span className="font-medium text-sm">Effective theme: {effectiveTheme.displayName}</span>
+                </div>
+                <ul className="space-y-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                  <li>• Global default: {globalThemeDisplay}</li>
+                  {spaceOverride && (
+                    <li>• Space override (you): {resolveTheme(spaceOverride).displayName}</li>
+                  )}
+                  {serverRoomDefault ? (
+                    <li>
+                      • Server default: {resolveTheme(serverRoomDefault.themeId).displayName}
+                      {serverRoomDefault.applyToNewUsers !== false ? ' (auto-apply)' : ' (suggestion)'}
+                    </li>
+                  ) : (
+                    <li>• Server default: not set</li>
+                  )}
+                  {roomOverride && (
+                    <li>• Your override: {resolveTheme(roomOverride).displayName}</li>
+                  )}
+                </ul>
+              </div>
 
-                  {/* Theme options */}
-                  {availableThemes.map((t) => (
+              <div className="space-y-6">
+                <section>
+                  <h5 className="font-semibold mb-2 text-sm" style={{ color: 'var(--color-text)' }}>Your local preference</h5>
+                  <div className="space-y-2">
                     <button
-                      key={t.name}
-                      onClick={() => setRoomTheme(room.roomId, t.name)}
+                      onClick={() => clearRoomTheme(room.roomId)}
                       className="w-full px-3 py-2 rounded text-left transition"
                       style={{
-                        backgroundColor: getRoomTheme(room.roomId) === t.name ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
-                        color: getRoomTheme(room.roomId) === t.name ? '#fff' : 'var(--color-textSecondary)',
+                        backgroundColor: !roomOverride ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                        color: !roomOverride ? '#fff' : 'var(--color-textSecondary)',
                         fontSize: 'var(--sizing-textSm)',
                       }}
                     >
-                      {t.displayName}
+                      Use server/global theme
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Space Theme Section (if room belongs to a space) */}
-              {(() => {
-                const spaceId = getParentSpace(room.roomId);
-                if (!spaceId) return null;
-                
-                return (
-                  <div>
-                    <h5 className="font-semibold mb-2 text-sm" style={{ color: 'var(--color-text)' }}>Space Theme Override</h5>
-                    <p className="mb-2 text-xs" style={{ color: 'var(--color-textMuted)' }}>
-                      Set the default theme for all rooms in this space
-                    </p>
-                    <div className="space-y-2">
-                      {/* Default option */}
+                    {sortedThemes.map((t) => (
                       <button
-                        onClick={() => clearSpaceTheme(spaceId)}
+                        key={t.name}
+                        onClick={() => setRoomTheme(room.roomId, t.name)}
                         className="w-full px-3 py-2 rounded text-left transition"
                         style={{
-                          backgroundColor: !getSpaceTheme(spaceId) ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
-                          color: !getSpaceTheme(spaceId) ? '#fff' : 'var(--color-textSecondary)',
+                          backgroundColor: roomOverride === t.name ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                          color: roomOverride === t.name ? '#fff' : 'var(--color-textSecondary)',
                           fontSize: 'var(--sizing-textSm)',
                         }}
                       >
-                        <div className="font-medium">Use Global Default</div>
-                        <div className="text-xs opacity-75">
-                          {availableThemes.find(t => t.name === defaultThemeName)?.displayName}
-                        </div>
+                        {t.displayName}
                       </button>
+                    ))}
+                  </div>
+                </section>
 
-                      {/* Theme options */}
-                      {availableThemes.map((t) => (
+                {parentSpaceId && (
+                  <section>
+                    <h5 className="font-semibold mb-2 text-sm" style={{ color: 'var(--color-text)' }}>Space theme override</h5>
+                    <p className="mb-2 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                      Set your preference for every room inside this space.
+                    </p>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => clearSpaceTheme(parentSpaceId)}
+                        className="w-full px-3 py-2 rounded text-left transition"
+                        style={{
+                          backgroundColor: !spaceOverride ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                          color: !spaceOverride ? '#fff' : 'var(--color-textSecondary)',
+                          fontSize: 'var(--sizing-textSm)',
+                        }}
+                      >
+                        Use global default
+                      </button>
+                      {sortedThemes.map((t) => (
                         <button
                           key={t.name}
-                          onClick={() => setSpaceTheme(spaceId, t.name)}
+                          onClick={() => setSpaceTheme(parentSpaceId, t.name)}
                           className="w-full px-3 py-2 rounded text-left transition"
                           style={{
-                            backgroundColor: getSpaceTheme(spaceId) === t.name ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
-                            color: getSpaceTheme(spaceId) === t.name ? '#fff' : 'var(--color-textSecondary)',
+                            backgroundColor: spaceOverride === t.name ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                            color: spaceOverride === t.name ? '#fff' : 'var(--color-textSecondary)',
                             fontSize: 'var(--sizing-textSm)',
                           }}
                         >
@@ -734,9 +919,239 @@ const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
                         </button>
                       ))}
                     </div>
+                  </section>
+                )}
+
+                {canManageThemes && (
+                  <section className="border border-[var(--color-border)] rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--color-text)' }}>
+                      <Palette className="w-4 h-4" />
+                      <span className="font-semibold text-sm">Server default for new members</span>
+                    </div>
+                    <p className="text-xs mb-3" style={{ color: 'var(--color-textMuted)' }}>
+                      Publish a default theme that new participants will see when they join. Disable auto-apply to offer it as a suggestion instead.
+                    </p>
+                    <div className="space-y-2">
+                      <select
+                        value={defaultThemeSelection}
+                        onChange={(e) => {
+                          setDefaultThemeSelection(e.target.value);
+                          setDefaultStatus(null);
+                        }}
+                        className="w-full px-3 py-2 rounded bg-[var(--color-bgSecondary)] border border-[var(--color-border)] text-sm"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <option value="">Select a theme…</option>
+                        {sortedThemes.map((t) => (
+                          <option key={t.name} value={t.name}>
+                            {t.displayName}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                        <input
+                          type="checkbox"
+                          checked={defaultApply}
+                          onChange={(e) => {
+                            setDefaultApply(e.target.checked);
+                            setDefaultStatus(null);
+                          }}
+                        />
+                        Auto-apply to new participants
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleSaveRoomDefault}
+                          disabled={defaultSaving || !defaultThemeSelection}
+                          className="px-3 py-2 rounded bg-[var(--color-primary)] text-white text-sm disabled:opacity-60"
+                        >
+                          {defaultSaving ? 'Saving…' : 'Save default'}
+                        </button>
+                        <button
+                          onClick={handleClearRoomDefault}
+                          disabled={defaultSaving}
+                          className="px-3 py-2 rounded border border-[var(--color-border)] text-sm"
+                          style={{ color: 'var(--color-textSecondary)' }}
+                        >
+                          Clear
+                        </button>
+                        {defaultStatus && (
+                          <span
+                            className="text-xs"
+                            style={{ color: defaultStatus.startsWith('Failed') ? '#f87171' : '#34d399' }}
+                          >
+                            {defaultStatus}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                <section className="border border-[var(--color-border)] rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--color-text)' }}>
+                    <UploadCloud className="w-4 h-4" />
+                    <span className="font-semibold text-sm">Shared theme library</span>
                   </div>
-                );
-              })()}
+                  {definitionEntries.length === 0 ? (
+                    <p className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                      No shared themes published for this room yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {definitionEntries.map((definition) => (
+                        <div
+                          key={definition.stateKey}
+                          className="flex items-start justify-between rounded border border-[var(--color-border)] px-3 py-2"
+                          style={{ backgroundColor: 'var(--color-bgSecondary)' }}
+                        >
+                          <div>
+                            <div className="font-medium" style={{ color: 'var(--color-text)' }}>
+                              {definition.theme.displayName}
+                            </div>
+                            <div className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                              ID: {definition.stateKey}
+                            </div>
+                            {definition.description && (
+                              <div className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                                {definition.description}
+                              </div>
+                            )}
+                            {definition.updatedBy && (
+                              <div className="text-[10px]" style={{ color: 'var(--color-textMuted)' }}>
+                                Last updated by {definition.updatedBy}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <button
+                              onClick={() => handleApplyDefinition(definition.theme.name)}
+                              className="px-2 py-1 text-xs rounded bg-[var(--color-primary)] text-white"
+                            >
+                              Apply locally
+                            </button>
+                            {canManageThemes && (
+                              <>
+                                <button
+                                  onClick={() => handleSetDefinitionAsDefault(definition.theme.name)}
+                                  disabled={defaultSaving}
+                                  className="px-2 py-1 text-xs rounded border border-[var(--color-border)]"
+                                  style={{ color: 'var(--color-textSecondary)' }}
+                                >
+                                  Set as default
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDefinition(definition.stateKey)}
+                                  disabled={definitionSaving}
+                                  className="px-2 py-1 text-xs rounded border border-[var(--color-border)] text-red-400"
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {canManageThemes && (
+                    <div className="mt-4 border-t border-[var(--color-border)] pt-3 space-y-2">
+                      <div className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                        <PlusCircle className="w-4 h-4" />
+                        <span className="font-semibold text-sm">Publish a new theme</span>
+                      </div>
+                      <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                        Base theme
+                        <select
+                          value={definitionBaseTheme}
+                          onChange={(e) => handleBaseThemeSelect(e.target.value)}
+                          className="w-full px-3 py-2 rounded bg-[var(--color-bgSecondary)] border border-[var(--color-border)]"
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {sortedThemes.map((t) => (
+                            <option key={t.name} value={t.name}>
+                              {t.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                        Theme ID
+                        <input
+                          type="text"
+                          value={definitionThemeId}
+                          onChange={(e) => {
+                            setDefinitionThemeId(e.target.value);
+                            setDefinitionStatus(null);
+                          }}
+                          className="px-3 py-2 rounded bg-[var(--color-bgSecondary)] border border-[var(--color-border)]"
+                          style={{ color: 'var(--color-text)' }}
+                          placeholder="e.g. terminal-amber"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                        Display name
+                        <input
+                          type="text"
+                          value={definitionDisplayName}
+                          onChange={(e) => {
+                            setDefinitionDisplayName(e.target.value);
+                            setDefinitionStatus(null);
+                          }}
+                          className="px-3 py-2 rounded bg-[var(--color-bgSecondary)] border border-[var(--color-border)]"
+                          style={{ color: 'var(--color-text)' }}
+                          placeholder="Terminal (Amber)"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                        Description (optional)
+                        <input
+                          type="text"
+                          value={definitionDescription}
+                          onChange={(e) => {
+                            setDefinitionDescription(e.target.value);
+                            setDefinitionStatus(null);
+                          }}
+                          className="px-3 py-2 rounded bg-[var(--color-bgSecondary)] border border-[var(--color-border)]"
+                          style={{ color: 'var(--color-text)' }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                        Theme JSON
+                        <textarea
+                          value={definitionJson}
+                          onChange={(e) => {
+                            setDefinitionJson(e.target.value);
+                            setDefinitionStatus(null);
+                          }}
+                          rows={8}
+                          className="px-3 py-2 rounded bg-[var(--color-bgSecondary)] border border-[var(--color-border)] font-mono text-xs"
+                          style={{ color: 'var(--color-text)', lineHeight: 1.4 }}
+                        />
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handlePublishTheme}
+                          disabled={definitionSaving}
+                          className="px-3 py-2 rounded bg-[var(--color-primary)] text-white text-sm disabled:opacity-60 flex items-center gap-2"
+                        >
+                          {definitionSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+                          Publish theme
+                        </button>
+                        {definitionStatus && (
+                          <span
+                            className="text-xs"
+                            style={{ color: definitionStatus.startsWith('Failed') ? '#f87171' : '#34d399' }}
+                          >
+                            {definitionStatus}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              </div>
             </div>
           </div>
         )}

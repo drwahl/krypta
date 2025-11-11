@@ -14,7 +14,7 @@
     "@matrix-org/olm": "^3.2.15",
     "date-fns": "^3.0.0",
     "lucide-react": "^0.294.0",
-    "matrix-js-sdk": "^31.0.0",
+    "matrix-js-sdk": "^39.2.0-rc.0",
     "matrix-widget-api": "^1.14.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

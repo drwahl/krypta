@@ -393,9 +393,26 @@ export const useElementCall = (room: Room | null, client: MatrixClient | null) =
     }
   }, [room, client, elementCallConfig]);
   
+  const leaveCall = useCallback(async () => {
+    if (widgetApiRef.current) {
+      try {
+        await widgetApiRef.current.transport.send('im.vector.hangup', {});
+      } catch (error) {
+        console.warn('[ElementCall] Failed to send hangup action', error);
+      }
+
+      try {
+        await widgetApiRef.current.transport.send('io.element.leave', {});
+      } catch (error) {
+        console.warn('[ElementCall] Failed to send leave action', error);
+      }
+    }
+  }, []);
+
   return {
     isCallRoom,
     callUrl,
     callIframeRef: attachCallIframe,
+    leaveCall,
   };
 };

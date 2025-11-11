@@ -1,161 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-export interface Theme {
-  name: string;
-  displayName: string;
-  colors: {
-    bg: string;
-    bgSecondary: string;
-    bgTertiary: string;
-    text: string;
-    textSecondary: string;
-    textMuted: string;
-    primary: string;
-    primaryHover: string;
-    border: string;
-    messageBubbleOwn: string;
-    messageBubbleOther: string;
-    hover: string;
-    accent: string;
-    success: string;
-    error: string;
-    warning: string;
-  };
-  fonts: {
-    body: string;
-    mono: string;
-  };
-  spacing: {
-    roomItemPadding: string;
-    roomItemGap: string;
-    sidebarPadding: string;
-    messagePadding: string;
-    messageGap: string;
-    inputPadding: string;
-  };
-  sizing: {
-    textBase: string;
-    textSm: string;
-    textXs: string;
-    textLg: string;
-    textXl: string;
-    roomItemHeight: string;
-    avatarSize: string;
-    avatarSizeSmall: string;
-    borderRadius: string;
-  };
-  style: {
-    showRoomPrefix: boolean;
-    roomPrefix: string;
-    messageStyle: 'bubbles' | 'terminal';
-    compactMode: boolean;
-  };
-}
-
-const themes: Record<string, Theme> = {
-  dark: {
-    name: 'dark',
-    displayName: 'Dark Mode',
-    colors: {
-      bg: '#0f172a',
-      bgSecondary: '#1e293b',
-      bgTertiary: '#334155',
-      text: '#f1f5f9',
-      textSecondary: '#cbd5e1',
-      textMuted: '#64748b',
-      primary: '#3b82f6',
-      primaryHover: '#2563eb',
-      border: '#475569',
-      messageBubbleOwn: '#3b82f6',
-      messageBubbleOther: '#1e293b',
-      hover: '#334155',
-      accent: '#8b5cf6',
-      success: '#10b981',
-      error: '#ef4444',
-      warning: '#f59e0b',
-    },
-    fonts: {
-      body: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-      mono: '"Fira Code", "Cascadia Code", "Source Code Pro", Menlo, Monaco, Consolas, monospace',
-    },
-    spacing: {
-      roomItemPadding: '0.75rem',
-      roomItemGap: '0.75rem',
-      sidebarPadding: '1rem',
-      messagePadding: '1rem 1.5rem',
-      messageGap: '1rem',
-      inputPadding: '1rem',
-    },
-    sizing: {
-      textBase: '0.875rem',
-      textSm: '0.75rem',
-      textXs: '0.625rem',
-      textLg: '1rem',
-      textXl: '1.25rem',
-      roomItemHeight: 'auto',
-      avatarSize: '2.5rem',
-      avatarSizeSmall: '2rem',
-      borderRadius: '0.5rem',
-    },
-    style: {
-      showRoomPrefix: false,
-      roomPrefix: '',
-      messageStyle: 'bubbles',
-      compactMode: false,
-    },
-  },
-  terminal: {
-    name: 'terminal',
-    displayName: 'Unix Terminal',
-    colors: {
-      bg: '#000000',
-      bgSecondary: '#0a0a0a',
-      bgTertiary: '#1a1a1a',
-      text: '#00ff00',
-      textSecondary: '#00cc00',
-      textMuted: '#008800',
-      primary: '#00ff00',
-      primaryHover: '#00cc00',
-      border: '#003300',
-      messageBubbleOwn: '#003300',
-      messageBubbleOther: '#001a00',
-      hover: '#001100',
-      accent: '#00ffff',
-      success: '#00ff00',
-      error: '#ff0000',
-      warning: '#ffff00',
-    },
-    fonts: {
-      body: '"IBM Plex Mono", "Courier New", Courier, monospace',
-      mono: '"IBM Plex Mono", "Courier New", Courier, monospace',
-    },
-    spacing: {
-      roomItemPadding: '0.25rem 0.5rem',
-      roomItemGap: '0.25rem',
-      sidebarPadding: '0.5rem',
-      messagePadding: '0.25rem 0.5rem',
-      messageGap: '0.125rem',
-      inputPadding: '0.5rem',
-    },
-    sizing: {
-      textBase: '0.75rem',
-      textSm: '0.6875rem',
-      textXs: '0.625rem',
-      textLg: '0.8125rem',
-      textXl: '0.875rem',
-      roomItemHeight: 'auto',
-      avatarSize: '1.25rem',
-      avatarSizeSmall: '1rem',
-      borderRadius: '0',
-    },
-    style: {
-      showRoomPrefix: true,
-      roomPrefix: '$ cd ',
-      messageStyle: 'terminal',
-      compactMode: true,
-    },
-  },
-};
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { useMatrix } from './MatrixContext';
+import { Theme } from './themeTypes';
+import { BUILT_IN_THEMES } from './themePresets';
+import { ThemeDefinition, ThemeServerDefaultMaps } from './types';
 
 interface ThemeContextType {
   theme: Theme; // Global theme (for UI chrome)
@@ -173,11 +20,18 @@ interface ThemeContextType {
   getSpaceTheme: (spaceId: string) => string | null;
   setCurrentRoom: (roomId: string | null, spaceId?: string | null) => void;
   availableThemes: Theme[];
+  allThemes: Record<string, Theme>;
+  serverRoomDefaults: ThemeServerDefaultMaps['rooms'];
+  serverSpaceDefaults: ThemeServerDefaultMaps['spaces'];
+  serverThemeDefinitions: Record<string, Record<string, ThemeDefinition>>;
+  resolveTheme: (themeName: string) => Theme;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { roomThemeDefaults, spaceThemeDefaults, themeDefinitions } = useMatrix();
+
   const [defaultThemeName, setDefaultThemeName] = useState<string>(() => {
     return localStorage.getItem('nychatt_theme') || 'terminal';
   });
@@ -195,29 +49,49 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [currentSpaceId, setCurrentSpaceId] = useState<string | null>(null);
 
+  const combinedThemes = useMemo(() => {
+    const merged: Record<string, Theme> = { ...BUILT_IN_THEMES };
+    Object.values(themeDefinitions).forEach((definitions) => {
+      Object.entries(definitions).forEach(([themeId, definition]) => {
+        merged[themeId] = definition.theme;
+      });
+    });
+    return merged;
+  }, [themeDefinitions]);
+
+  // Ensure default theme always points to a valid theme
+  useEffect(() => {
+    if (!combinedThemes[defaultThemeName]) {
+      setDefaultThemeName('terminal');
+    }
+  }, [combinedThemes, defaultThemeName]);
+
   // Global theme always uses the default (for UI chrome)
-  const globalTheme = themes[defaultThemeName] || themes.terminal;
+  const globalTheme = combinedThemes[defaultThemeName] || combinedThemes.terminal || BUILT_IN_THEMES.terminal;
   
   // Room theme uses hierarchy for the active room: room > space > global
+  const serverRoomDefault = currentRoomId ? roomThemeDefaults[currentRoomId] : undefined;
+  const serverSpaceDefault = currentSpaceId ? spaceThemeDefaults[currentSpaceId] : undefined;
+
   const roomThemeName = 
     (currentRoomId && roomThemeOverrides[currentRoomId]) || 
     (currentSpaceId && spaceThemeOverrides[currentSpaceId]) || 
+    (serverRoomDefault?.themeId && combinedThemes[serverRoomDefault.themeId] ? serverRoomDefault.themeId : null) ||
+    (serverSpaceDefault?.themeId && combinedThemes[serverSpaceDefault.themeId] ? serverSpaceDefault.themeId : null) ||
     defaultThemeName;
-  const roomTheme = themes[roomThemeName] || themes.terminal;
-  
   // For backwards compatibility, 'theme' returns the global theme
   const theme = globalTheme;
   const themeName = defaultThemeName;
 
   const setTheme = (newThemeName: string) => {
-    if (themes[newThemeName]) {
+    if (combinedThemes[newThemeName]) {
       setDefaultThemeName(newThemeName);
       localStorage.setItem('nychatt_theme', newThemeName);
     }
   };
 
   const setRoomTheme = (roomId: string, themeName: string) => {
-    if (themes[themeName]) {
+    if (combinedThemes[themeName]) {
       const newOverrides = { ...roomThemeOverrides, [roomId]: themeName };
       setRoomThemeOverrides(newOverrides);
       localStorage.setItem('nychatt_room_themes', JSON.stringify(newOverrides));
@@ -236,7 +110,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const setSpaceTheme = (spaceId: string, themeName: string) => {
-    if (themes[themeName]) {
+    if (combinedThemes[themeName]) {
       const newOverrides = { ...spaceThemeOverrides, [spaceId]: themeName };
       setSpaceThemeOverrides(newOverrides);
       localStorage.setItem('nychatt_space_themes', JSON.stringify(newOverrides));
@@ -265,11 +139,18 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getRoomThemeObject = (roomId: string, spaceId: string | null): Theme => {
     const roomOverride = roomThemeOverrides[roomId];
     const spaceOverride = spaceId ? spaceThemeOverrides[spaceId] : null;
-    const effectiveThemeName = roomOverride || spaceOverride || defaultThemeName;
-    return themes[effectiveThemeName] || themes.terminal;
+    const serverRoom = roomThemeDefaults[roomId];
+    const serverSpace = spaceId ? spaceThemeDefaults[spaceId] : undefined;
+    const effectiveThemeName =
+      roomOverride ||
+      spaceOverride ||
+      (serverRoom?.themeId && combinedThemes[serverRoom.themeId] ? serverRoom.themeId : null) ||
+      (serverSpace?.themeId && combinedThemes[serverSpace.themeId] ? serverSpace.themeId : null) ||
+      defaultThemeName;
+    return combinedThemes[effectiveThemeName] || combinedThemes.terminal || BUILT_IN_THEMES.terminal;
   };
 
-  const availableThemes = Object.values(themes);
+  const availableThemes = useMemo(() => Object.values(combinedThemes), [combinedThemes]);
 
   // Apply GLOBAL theme CSS variables to document root (for UI chrome)
   useEffect(() => {
@@ -324,7 +205,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       clearSpaceTheme,
       getSpaceTheme,
       setCurrentRoom: setCurrentRoomWrapper,
-      availableThemes 
+      availableThemes,
+      allThemes: combinedThemes,
+      serverRoomDefaults: roomThemeDefaults,
+      serverSpaceDefaults: spaceThemeDefaults,
+      serverThemeDefinitions: themeDefinitions,
+      resolveTheme: (name: string) => combinedThemes[name] || combinedThemes.terminal || BUILT_IN_THEMES.terminal,
     }}>
       {children}
     </ThemeContext.Provider>

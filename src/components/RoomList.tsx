@@ -6,6 +6,7 @@ import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, 
 import { Room } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import Settings from './Settings';
+import Invites from './Invites';
 import { SortMode } from './SortSelector';
 
 const RoomListComponent: React.FC = () => {
@@ -488,6 +489,9 @@ const RoomListComponent: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Invites Section */}
+      <Invites />
 
       {/* User info */}
       {!theme.style.compactMode && (
