@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock } from 'lucide-react';
 import { Room } from 'matrix-js-sdk';
+import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 
 const RoomList: React.FC = () => {
   const { rooms, spaces, currentRoom, setCurrentRoom, logout, client } = useMatrix();
@@ -92,8 +93,9 @@ const RoomList: React.FC = () => {
     const isActive = currentRoom?.roomId === room.roomId;
     const unreadCount = getUnreadCount(room);
     const members = room.getJoinedMemberCount();
-    const icon = members > 2 ? <Users className="w-4 h-4" /> : <MessageCircle className="w-4 h-4" />;
     const isEncrypted = room.hasEncryptionStateEvent();
+    const avatarUrl = getRoomAvatarUrl(room, client, 32);
+    const initials = getRoomInitials(room.name);
 
     return (
       <button
@@ -102,9 +104,18 @@ const RoomList: React.FC = () => {
           isActive ? 'bg-slate-700 border-l-4 border-primary-500' : ''
         } ${indent ? 'pl-12' : ''}`}
       >
-        <div className={`text-slate-400 ${isActive ? 'text-primary-400' : ''}`}>
-          {icon}
-        </div>
+        {/* Room Avatar or Initials */}
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={room.name}
+            className="w-6 h-6 rounded-md flex-shrink-0 object-cover"
+          />
+        ) : (
+          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+            {initials}
+          </div>
+        )}
         <div className="flex-1 min-w-0 text-left flex items-center gap-1">
           <p className={`text-sm font-medium truncate ${
             isActive ? 'text-white' : 'text-slate-300'
@@ -235,7 +246,21 @@ const RoomList: React.FC = () => {
                     ) : (
                       <ChevronRight className="w-4 h-4 text-slate-400" />
                     )}
-                    <Hash className="w-4 h-4 text-primary-400" />
+                    {(() => {
+                      const spaceAvatarUrl = getRoomAvatarUrl(space, client, 32);
+                      const spaceInitials = getRoomInitials(space.name);
+                      return spaceAvatarUrl ? (
+                        <img
+                          src={spaceAvatarUrl}
+                          alt={space.name}
+                          className="w-6 h-6 rounded-md flex-shrink-0 object-cover"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 rounded-md bg-primary-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                          {spaceInitials}
+                        </div>
+                      );
+                    })()}
                     <div className="flex-1 min-w-0 text-left">
                       <p className="text-sm font-semibold text-white truncate">
                         {space.name}
