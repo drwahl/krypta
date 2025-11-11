@@ -93,38 +93,41 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       
       // Initialize crypto - this is required for E2EE
       try {
-        // Check if Olm is already loaded
-        if (!(window as any).Olm) {
-          // Load Olm library dynamically
-          const olmLib = await import('@matrix-org/olm');
+        // Check if Olm is already loaded and properly initialized
+        if (!(window as any).Olm || typeof (window as any).Olm?.init !== 'function') {
+          // Load Olm from public directory (copied by postinstall script)
+          const loadOlm = () => new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = '/olm.js';
+            script.onload = () => {
+              console.log('olm.js script loaded');
+              console.log('window.Olm after load:', (window as any).Olm);
+              console.log('typeof window.Olm:', typeof (window as any).Olm);
+              resolve(true);
+            };
+            script.onerror = () => reject(new Error('Failed to load olm.js'));
+            document.head.appendChild(script);
+          });
           
-          console.log('olmLib:', olmLib);
-          console.log('olmLib.default:', olmLib.default);
-          console.log('olmLib keys:', Object.keys(olmLib));
+          await loadOlm();
           
-          // The Olm library is a function that returns a promise
-          let Olm;
-          if (typeof olmLib.default === 'function') {
-            // Call the function and await the result
-            Olm = await olmLib.default();
-            console.log('Olm loaded (pattern 1 - function call)');
-          } else if (typeof olmLib === 'function') {
-            // Sometimes it's the module itself that's the function
-            Olm = await (olmLib as any)();
-            console.log('Olm loaded (pattern 2 - module function)');
+          // olm.js defines a global Olm function, call it to initialize
+          if (typeof (window as any).Olm === 'function') {
+            console.log('Calling Olm() to initialize...');
+            const OlmInstance = await (window as any).Olm();
+            console.log('OlmInstance:', OlmInstance);
+            (window as any).Olm = OlmInstance;
+            console.log('Olm loaded and initialized from /olm.js');
           } else {
-            // Use default if it exists
-            Olm = olmLib.default || olmLib;
-            console.log('Olm loaded (pattern 3 - direct)');
+            console.error('Olm script loaded but window.Olm is not a function');
+            console.error('typeof window.Olm:', typeof (window as any).Olm);
+            console.error('window.Olm value:', (window as any).Olm);
           }
-          
-          (window as any).Olm = Olm;
         }
         
         // Verify Olm is properly loaded
-        console.log('window.Olm:', (window as any).Olm);
-        console.log('window.Olm type:', typeof (window as any).Olm);
-        console.log('window.Olm.init exists?', !!(window as any).Olm?.init);
+        console.log('Final window.Olm:', (window as any).Olm);
+        console.log('Final window.Olm.init:', (window as any).Olm?.init);
         
         await loggedInClient.initCrypto();
         console.log('✅ Crypto initialized successfully');
@@ -360,30 +363,30 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           try {
             // Check if Olm is already loaded
             if (!(window as any).Olm) {
-              // Load Olm library dynamically
-              const olmLib = await import('@matrix-org/olm');
+              // Load Olm from public directory (copied by postinstall script)
+              const loadOlm = () => new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = '/olm.js';
+                script.onload = () => resolve(true);
+                script.onerror = () => reject(new Error('Failed to load olm.js'));
+                document.head.appendChild(script);
+              });
               
-              // Try different import patterns
-              if (typeof olmLib.default === 'function') {
-                // Pattern 1: default export is init function
-                const Olm = await olmLib.default();
-                (window as any).Olm = Olm;
-                console.log('Olm loaded (pattern 1 - function) [restored]');
-              } else if (olmLib.default?.init) {
-                // Pattern 2: default export has init method
-                await olmLib.default.init();
-                (window as any).Olm = olmLib.default;
-                console.log('Olm loaded (pattern 2 - init method) [restored]');
+              await loadOlm();
+              
+              // olm.js defines a global Olm function, call it to initialize
+              if (typeof (window as any).Olm === 'function') {
+                const OlmInstance = await (window as any).Olm();
+                (window as any).Olm = OlmInstance;
+                console.log('Olm loaded and initialized from /olm.js [restored]');
               } else {
-                // Pattern 3: default export is Olm itself
-                (window as any).Olm = olmLib.default;
-                console.log('Olm loaded (pattern 3 - direct) [restored]');
+                console.error('Olm script loaded but Olm function not found [restored]');
               }
             }
             
             // Verify Olm is properly loaded
             console.log('window.Olm [restored]:', (window as any).Olm);
-            console.log('window.Olm type [restored]:', typeof (window as any).Olm);
+            console.log('window.Olm.init [restored]:', (window as any).Olm?.init);
             
             await restoredClient.initCrypto();
             console.log('✅ Crypto initialized successfully (restored session)');
