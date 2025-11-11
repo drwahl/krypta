@@ -8,7 +8,7 @@ import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import ThemeSelector from './ThemeSelector';
 import SortSelector, { SortMode } from './SortSelector';
 
-const RoomList: React.FC = () => {
+const RoomListComponent: React.FC = () => {
   const { rooms, spaces, logout, client } = useMatrix();
   const { theme } = useTheme();
   const { openRooms, addRoom, activeRoomId } = useMultiRoom();
@@ -682,6 +682,9 @@ const RoomList: React.FC = () => {
     </div>
   );
 };
+
+// Memoize to prevent re-renders during window resize
+const RoomList = React.memo(RoomListComponent);
 
 export default RoomList;
 

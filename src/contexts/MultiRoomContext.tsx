@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useMemo } from 'react';
 import { Room } from 'matrix-js-sdk';
+
+type LayoutDirection = 'horizontal' | 'vertical';
 
 interface MultiRoomContextType {
   openRooms: Room[];
@@ -8,6 +10,10 @@ interface MultiRoomContextType {
   setActiveRoom: (roomId: string) => void;
   activeRoomId: string | null;
   maxRooms: number;
+  layoutDirection: LayoutDirection;
+  setLayoutDirection: (direction: LayoutDirection) => void;
+  roomSizes: Record<string, number>;
+  setRoomSize: (roomId: string, size: number) => void;
 }
 
 const MultiRoomContext = createContext<MultiRoomContextType | undefined>(undefined);
@@ -15,7 +21,25 @@ const MultiRoomContext = createContext<MultiRoomContextType | undefined>(undefin
 export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [openRooms, setOpenRooms] = useState<Room[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [layoutDirection, setLayoutDirectionState] = useState<LayoutDirection>(() => {
+    const stored = localStorage.getItem('nychatt_layout_direction');
+    return (stored === 'vertical' || stored === 'horizontal') ? stored : 'horizontal';
+  });
+  const [roomSizes, setRoomSizesState] = useState<Record<string, number>>({});
   const maxRooms = 3; // Maximum number of rooms that can be open simultaneously
+
+  // Persist layout direction to localStorage
+  useEffect(() => {
+    localStorage.setItem('nychatt_layout_direction', layoutDirection);
+  }, [layoutDirection]);
+
+  const setLayoutDirection = useCallback((direction: LayoutDirection) => {
+    setLayoutDirectionState(direction);
+  }, []);
+
+  const setRoomSize = useCallback((roomId: string, size: number) => {
+    setRoomSizesState(prev => ({ ...prev, [roomId]: size }));
+  }, []);
 
   const addRoom = (room: Room) => {
     if (!room) return;
@@ -55,15 +79,21 @@ export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children 
     });
   };
 
+  const contextValue = useMemo(() => ({
+    openRooms, 
+    addRoom, 
+    removeRoom, 
+    setActiveRoom: setActiveRoomId,
+    activeRoomId,
+    maxRooms,
+    layoutDirection,
+    setLayoutDirection,
+    roomSizes,
+    setRoomSize
+  }), [openRooms, addRoom, removeRoom, activeRoomId, layoutDirection, setLayoutDirection, roomSizes, setRoomSize]);
+
   return (
-    <MultiRoomContext.Provider value={{ 
-      openRooms, 
-      addRoom, 
-      removeRoom, 
-      setActiveRoom: setActiveRoomId,
-      activeRoomId,
-      maxRooms 
-    }}>
+    <MultiRoomContext.Provider value={contextValue}>
       {children}
     </MultiRoomContext.Provider>
   );

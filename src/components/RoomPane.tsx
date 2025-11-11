@@ -13,9 +13,9 @@ interface RoomPaneProps {
   isActive: boolean;
 }
 
-const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
+const RoomPaneComponent: React.FC<RoomPaneProps> = ({ room, isActive }) => {
   const { setCurrentRoom, getParentSpace } = useMatrix();
-  const { removeRoom, setActiveRoom, openRooms } = useMultiRoom();
+  const { removeRoom, setActiveRoom, openRooms, layoutDirection } = useMultiRoom();
   const { theme: globalTheme, setCurrentRoom: setThemeCurrentRoom, getRoomThemeObject } = useTheme();
   const [showInfo, setShowInfo] = useState(false);
   
@@ -85,9 +85,8 @@ const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
 
   return (
     <div 
-      className="flex-1 flex min-w-0 relative"
+      className="flex-1 flex min-w-0 relative h-full"
       style={{
-        borderRight: openRooms.length > 1 ? '1px solid var(--color-border)' : 'none',
         backgroundColor: isActive ? 'var(--color-bg)' : 'var(--color-bgSecondary)',
         opacity: isActive ? 1 : 0.7,
         transition: 'opacity 0.2s',
@@ -183,12 +182,20 @@ const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
         {/* Active indicator */}
         {isActive && openRooms.length > 1 && (
           <div 
-            style={{
+            style={layoutDirection === 'horizontal' ? {
               position: 'absolute',
               top: 0,
               left: 0,
               right: 0,
               height: '2px',
+              backgroundColor: 'var(--color-primary)',
+              zIndex: 10,
+            } : {
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: '2px',
               backgroundColor: 'var(--color-primary)',
               zIndex: 10,
             }}
@@ -206,6 +213,12 @@ const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
     </div>
   );
 };
+
+// Memoize to prevent unnecessary re-renders during resize
+const RoomPane = React.memo(RoomPaneComponent, (prevProps, nextProps) => {
+  // Only re-render if room ID or active status changes
+  return prevProps.room.roomId === nextProps.room.roomId && prevProps.isActive === nextProps.isActive;
+});
 
 export default RoomPane;
 

@@ -28,7 +28,7 @@ const getUserColor = (username: string): string => {
 };
 
 // Media renderer component - defined outside to prevent recreation on every render
-const MediaRenderer = React.memo<{ content: any; client: MatrixClient }>(({ content, client }) => {
+const MediaRenderer = React.memo<{ content: any; client: MatrixClient; eventType?: string }>(({ content, client, eventType }) => {
   const msgtype = content.msgtype;
   const mxcUrl = content.url;
   
@@ -42,6 +42,57 @@ const MediaRenderer = React.memo<{ content: any; client: MatrixClient }>(({ cont
   
   const filename = content.body || 'file';
   const filesize = content.info?.size;
+  
+  // Stickers (event type m.sticker)
+  if (eventType === 'm.sticker') {
+    const width = content.info?.w;
+    const height = content.info?.h;
+    const thumbnailUrl = content.info?.thumbnail_url 
+      ? client.mxcUrlToHttp(content.info.thumbnail_url)
+      : null;
+    const authenticatedThumbnailUrl = thumbnailUrl 
+      ? `${thumbnailUrl}${thumbnailUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`
+      : null;
+    
+    // Use thumbnail if available, otherwise use main image
+    const displayUrl = authenticatedThumbnailUrl || authenticatedUrl;
+    
+    // Calculate display size (max 200px, maintain aspect ratio)
+    const maxSize = 200;
+    let displayWidth = width;
+    let displayHeight = height;
+    
+    if (width && height) {
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          displayWidth = maxSize;
+          displayHeight = Math.round((height / width) * maxSize);
+        } else {
+          displayHeight = maxSize;
+          displayWidth = Math.round((width / height) * maxSize);
+        }
+      }
+    }
+    
+    return (
+      <div className="mt-2 inline-block">
+        <img
+          src={displayUrl}
+          alt={content.body || 'Sticker'}
+          title={content.body || 'Sticker'}
+          loading="lazy"
+          style={{
+            maxWidth: displayWidth ? `${displayWidth}px` : '200px',
+            maxHeight: displayHeight ? `${displayHeight}px` : '200px',
+            width: 'auto',
+            height: 'auto',
+            borderRadius: '4px',
+            display: 'block',
+          }}
+        />
+      </div>
+    );
+  }
   
   // Images
   if (msgtype === 'm.image') {
@@ -75,15 +126,52 @@ const MediaRenderer = React.memo<{ content: any; client: MatrixClient }>(({ cont
   
   // Videos
   if (msgtype === 'm.video') {
+    const width = content.info?.w;
+    const height = content.info?.h;
+    const mimetype = content.info?.mimetype;
+    
+    // Get video thumbnail if available
+    const thumbnailUrl = content.info?.thumbnail_url 
+      ? client.mxcUrlToHttp(content.info.thumbnail_url)
+      : null;
+    const authenticatedThumbnailUrl = thumbnailUrl 
+      ? `${thumbnailUrl}${thumbnailUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`
+      : null;
+    
+    // Calculate display dimensions (max 600px width, maintain aspect ratio)
+    const maxWidth = 600;
+    let displayWidth = width;
+    let displayHeight = height;
+    
+    if (width && width > maxWidth) {
+      displayWidth = maxWidth;
+      if (height) {
+        displayHeight = Math.round((height / width) * maxWidth);
+      }
+    }
+    
     return (
       <div className="mt-2">
         <video
-          src={authenticatedUrl}
           controls
-          className="max-w-sm max-h-96 rounded-lg"
+          className="rounded-lg bg-slate-800"
           preload="metadata"
+          poster={authenticatedThumbnailUrl || undefined}
+          style={{
+            maxWidth: displayWidth ? `${displayWidth}px` : '600px',
+            maxHeight: displayHeight ? `${displayHeight}px` : '400px',
+            width: '100%',
+            height: 'auto',
+          }}
+          onError={(e) => {
+            console.error('Video playback error:', e);
+            console.error('Video URL:', authenticatedUrl);
+            console.error('Video mimetype:', mimetype);
+            console.error('Video dimensions:', width, 'x', height);
+          }}
         >
-          Your browser doesn't support video playback.
+          <source src={authenticatedUrl} type={mimetype || 'video/mp4'} />
+          Your browser doesn't support video playback. Try downloading the video instead.
         </video>
         {filename && (
           <div className="text-xs text-slate-400 mt-1">{filename}</div>
@@ -170,126 +258,207 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   // Flatten all emojis for easy access
   const allEmojis = Object.values(emojiCategories).flat();
 
-  // Parse message for user mentions and render as pills
+  // Get read receipts for a message - returns list of users who have read up to this message
+  const getReadReceipts = (event: MatrixEvent): Array<{ userId: string; displayName: string; avatarUrl: string | null }> => {
+    if (!currentRoom || !client) return [];
+    
+    const eventId = event.getId();
+    if (!eventId) return [];
+    
+    const receipts: Array<{ userId: string; displayName: string; avatarUrl: string | null }> = [];
+    const currentUserId = client.getUserId();
+    
+    // Get all members who have read this specific event
+    const receiptMembers = currentRoom.getUsersReadUpTo(event);
+    
+    receiptMembers.forEach((member: any) => {
+      // member could be a RoomMember object or string
+      const userId = typeof member === 'string' ? member : (member.userId || member);
+      
+      // Skip own user
+      if (userId === currentUserId) return;
+      
+      const roomMember = currentRoom.getMember(userId);
+      const displayName = roomMember?.name || userId.split(':')[0];
+      const avatarMxc = roomMember?.getMxcAvatarUrl();
+      const avatarUrl = avatarMxc ? client.mxcUrlToHttp(avatarMxc, 24, 24, 'crop') : null;
+      
+      receipts.push({ userId, displayName, avatarUrl });
+    });
+    
+    return receipts;
+  };
+
+  // Send read receipt for the last visible message
+  const sendReadReceipt = useCallback((event: MatrixEvent) => {
+    if (!client || !currentRoom) return;
+    
+    const eventId = event.getId();
+    if (!eventId) return;
+    
+    try {
+      client.sendReadReceipt(event);
+    } catch (error) {
+      console.error('Failed to send read receipt:', error);
+    }
+  }, [client, currentRoom]);
+
+  // Parse message for user mentions and URLs, render as pills/links
   const renderMessageWithMentions = (text: string) => {
     if (!currentRoom) return text;
     
-    // Match Matrix.to user links: https://matrix.to/#/@user:homeserver
+    // Regex patterns
     const matrixLinkRegex = /https:\/\/matrix\.to\/#\/(@[a-zA-Z0-9._=\-]+:[a-zA-Z0-9.\-]+)/g;
-    // Also match plain @username patterns for backwards compatibility
+    const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
     const plainMentionRegex = /@([a-zA-Z0-9.\-_\s]+?)(?=\s|$|[.,!?;:])/g;
     
-    const parts = [];
-    let lastIndex = 0;
+    // Find all matches with their positions
+    interface Match {
+      type: 'matrixLink' | 'url' | 'mention';
+      start: number;
+      end: number;
+      match: string;
+      data?: any;
+    }
     
-    // First, process Matrix.to links
+    const matches: Match[] = [];
     let match;
-    const processedRanges: Array<{start: number, end: number}> = [];
     
+    // Find Matrix.to user links
+    matrixLinkRegex.lastIndex = 0;
     while ((match = matrixLinkRegex.exec(text)) !== null) {
       const userId = match[1];
-      const matchStart = match.index;
-      const matchEnd = match.index + match[0].length;
-      
-      // Add text before mention
-      if (matchStart > lastIndex) {
-        parts.push(
-          <span key={`text-${lastIndex}`}>
-            {text.substring(lastIndex, matchStart)}
-          </span>
-        );
-      }
-      
-      // Find the user in the room
       const members = currentRoom.getJoinedMembers();
       const mentionedUser = members.find(member => member.userId === userId);
       const displayName = mentionedUser?.name || userId.split(':')[0].substring(1);
       
-      // Render mention as clickable pill link
-      parts.push(
-        <a
-          key={`mention-${matchStart}`}
-          href={match[0]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition font-medium no-underline"
-          title={userId}
-          onClick={(e) => {
-            e.stopPropagation();
-            console.log('Clicked user:', userId);
-          }}
-        >
-          @{displayName}
-        </a>
+      matches.push({
+        type: 'matrixLink',
+        start: match.index,
+        end: match.index + match[0].length,
+        match: match[0],
+        data: { userId, displayName, url: match[0] }
+      });
+    }
+    
+    // Find all other URLs (not Matrix.to user links)
+    urlRegex.lastIndex = 0;
+    while ((match = urlRegex.exec(text)) !== null) {
+      const url = match[0];
+      const matchStart = match.index;
+      const matchEnd = match.index + match[0].length;
+      
+      // Skip if this URL is already a Matrix.to user link
+      const isAlreadyProcessed = matches.some(m => 
+        m.start <= matchStart && m.end >= matchEnd
       );
       
-      processedRanges.push({ start: matchStart, end: matchEnd });
-      lastIndex = matchEnd;
-    }
-    
-    // Reset for second pass (plain mentions)
-    plainMentionRegex.lastIndex = 0;
-    
-    // Process plain @mentions that weren't already covered by Matrix.to links
-    const textSegments = text.split('');
-    let currentText = '';
-    let currentStart = lastIndex === 0 ? 0 : lastIndex;
-    
-    // If we processed Matrix.to links, handle remaining text
-    if (processedRanges.length > 0) {
-      // Add remaining text after last Matrix.to link
-      if (lastIndex < text.length) {
-        parts.push(
-          <span key={`text-${lastIndex}`}>
-            {text.substring(lastIndex)}
-          </span>
-        );
+      if (!isAlreadyProcessed) {
+        matches.push({
+          type: 'url',
+          start: matchStart,
+          end: matchEnd,
+          match: url,
+          data: { url }
+        });
       }
-      return parts.length > 0 ? parts : text;
     }
     
-    // No Matrix.to links found, process plain mentions
+    // Find plain @mentions (not in URLs)
+    plainMentionRegex.lastIndex = 0;
     while ((match = plainMentionRegex.exec(text)) !== null) {
       const mentionedName = match[1];
       const matchStart = match.index;
       const matchEnd = match.index + match[0].length;
       
-      // Add text before mention
-      if (matchStart > lastIndex) {
+      // Skip if this is inside a URL or Matrix link
+      const isInUrl = matches.some(m => 
+        m.start <= matchStart && m.end >= matchEnd
+      );
+      
+      if (!isInUrl) {
+        const members = currentRoom.getJoinedMembers();
+        const mentionedUser = members.find(member => 
+          member.name === mentionedName || 
+          member.userId === `@${mentionedName}` ||
+          member.userId.toLowerCase().includes(mentionedName.toLowerCase())
+        );
+        
+        if (mentionedUser) {
+          matches.push({
+            type: 'mention',
+            start: matchStart,
+            end: matchEnd,
+            match: match[0],
+            data: { user: mentionedUser }
+          });
+        }
+      }
+    }
+    
+    // Sort matches by position
+    matches.sort((a, b) => a.start - b.start);
+    
+    // Build the result
+    const parts = [];
+    let lastIndex = 0;
+    
+    matches.forEach((m) => {
+      // Add text before this match
+      if (m.start > lastIndex) {
         parts.push(
           <span key={`text-${lastIndex}`}>
-            {text.substring(lastIndex, matchStart)}
+            {text.substring(lastIndex, m.start)}
           </span>
         );
       }
       
-      // Find the user in the room
-      const members = currentRoom.getJoinedMembers();
-      const mentionedUser = members.find(member => 
-        member.name === mentionedName || 
-        member.userId === `@${mentionedName}` ||
-        member.userId.toLowerCase().includes(mentionedName.toLowerCase())
-      );
+      // Add the match
+      if (m.type === 'matrixLink') {
+        parts.push(
+          <a
+            key={`link-${m.start}`}
+            href={m.data.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition font-medium no-underline"
+            title={m.data.userId}
+            onClick={(e) => e.stopPropagation()}
+          >
+            @{m.data.displayName}
+          </a>
+        );
+      } else if (m.type === 'url') {
+        parts.push(
+          <a
+            key={`url-${m.start}`}
+            href={m.data.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-400 hover:text-blue-300 underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {m.data.url}
+          </a>
+        );
+      } else if (m.type === 'mention') {
+        parts.push(
+          <span
+            key={`mention-${m.start}`}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition cursor-pointer font-medium"
+            title={m.data.user.userId}
+            onClick={(e) => {
+              e.stopPropagation();
+              console.log('Clicked user:', m.data.user.userId);
+            }}
+          >
+            @{m.data.user.name}
+          </span>
+        );
+      }
       
-      // Render mention as pill (non-link for plain mentions)
-      parts.push(
-        <span
-          key={`mention-${matchStart}`}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition cursor-pointer font-medium"
-          title={mentionedUser?.userId || `@${mentionedName}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (mentionedUser) {
-              console.log('Clicked user:', mentionedUser.userId);
-            }
-          }}
-        >
-          @{mentionedName}
-        </span>
-      );
-      
-      lastIndex = matchEnd;
-    }
+      lastIndex = m.end;
+    });
     
     // Add remaining text
     if (lastIndex < text.length) {
@@ -463,7 +632,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     const updateMessages = () => {
       const timelineEvents = currentRoom.getLiveTimeline().getEvents();
       const messageEvents = timelineEvents.filter(
-        (event) => event.getType() === 'm.room.message'
+        (event) => event.getType() === 'm.room.message' || event.getType() === 'm.sticker'
       );
       setMessages(messageEvents);
       
@@ -492,15 +661,25 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       }
     };
 
+    // Handle read receipt updates
+    const handleReceipt = () => {
+      // Force re-render to update read receipts
+      setReactionUpdate(prev => prev + 1);
+    };
+
     // Listen for both timeline events and relation events (reactions)
     client?.on('Room.timeline' as any, handleTimeline);
     client?.on('Room.redaction' as any, handleTimeline);
+    client?.on('Room.receipt' as any, handleReceipt);
     currentRoom?.on('Room.timeline' as any, handleTimeline);
+    currentRoom?.on('Room.receipt' as any, handleReceipt);
 
     return () => {
       client?.removeListener('Room.timeline' as any, handleTimeline);
       client?.removeListener('Room.redaction' as any, handleTimeline);
+      client?.removeListener('Room.receipt' as any, handleReceipt);
       currentRoom?.removeListener('Room.timeline' as any, handleTimeline);
+      currentRoom?.removeListener('Room.receipt' as any, handleReceipt);
     };
   }, [currentRoom, client]);
 
@@ -510,6 +689,44 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isLoadingMore]);
+
+  // Automatically send read receipts for visible messages
+  useEffect(() => {
+    if (!currentRoom || messages.length === 0) return;
+
+    const options = {
+      root: null,
+      rootMargin: '0px',
+      threshold: 0.5 // Message must be 50% visible
+    };
+
+    const observers = new Map<string, IntersectionObserver>();
+
+    messages.forEach((event) => {
+      const eventId = event.getId();
+      if (!eventId) return;
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            // Send read receipt for this message
+            sendReadReceipt(event);
+          }
+        });
+      }, options);
+
+      // Find the DOM element for this message
+      const element = document.querySelector(`[data-event-id="${eventId}"]`);
+      if (element) {
+        observer.observe(element);
+        observers.set(eventId, observer);
+      }
+    });
+
+    return () => {
+      observers.forEach(observer => observer.disconnect());
+    };
+  }, [messages, currentRoom, sendReadReceipt]);
 
   // Infinite scroll: auto-load more messages when scrolling to top
   useEffect(() => {
@@ -815,7 +1032,9 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
             const content = event.getContent();
             const timestamp = event.getTs();
             const eventId = event.getId()!;
+            const eventType = event.getType();
             const reactions = getReactions(event);
+            const readReceipts = getReadReceipts(event);
             const isOwn = sender === client?.getUserId();
             const isEncrypted = event.isEncrypted();
             const isDecryptionFailure = event.isDecryptionFailure();
@@ -833,6 +1052,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
               return (
                 <div
                   key={eventId}
+                  data-event-id={eventId}
                   className="group"
                   style={{
                     padding: 'var(--spacing-messagePadding)',
@@ -891,10 +1111,10 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                       </span>
                     ) : (
                       <>
-                        {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video')) && (
+                        {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video' && eventType !== 'm.sticker')) && (
                           <span>{renderMessageWithMentions(content.body || '')}</span>
                         )}
-                        {client && <MediaRenderer content={content} client={client} />}
+                        {client && <MediaRenderer content={content} client={client} eventType={eventType} />}
                         
                         {/* URL Previews */}
                         {content.body && content.msgtype === 'm.text' && extractUrls(content.body).map((url, idx) => (
@@ -1164,6 +1384,52 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                       </div>
                     </>
                   )}
+                  
+                  {/* Read Receipts - show who has read up to this message */}
+                  {readReceipts.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.25rem', marginLeft: 'auto' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '-0.5rem' }}>
+                        {readReceipts.slice(0, 3).map((receipt) => (
+                          receipt.avatarUrl ? (
+                            <img
+                              key={receipt.userId}
+                              src={receipt.avatarUrl}
+                              alt={receipt.displayName}
+                              title={`Read by ${receipt.displayName}`}
+                              className="rounded-full object-cover"
+                              style={{
+                                width: '1rem',
+                                height: '1rem',
+                                border: '1px solid var(--color-bg)',
+                                marginLeft: '-0.25rem'
+                              }}
+                            />
+                          ) : (
+                            <div
+                              key={receipt.userId}
+                              title={`Read by ${receipt.displayName}`}
+                              className="rounded-full flex items-center justify-center text-white font-semibold"
+                              style={{
+                                width: '1rem',
+                                height: '1rem',
+                                backgroundColor: getUserColor(receipt.userId),
+                                fontSize: '0.5rem',
+                                border: '1px solid var(--color-bg)',
+                                marginLeft: '-0.25rem'
+                              }}
+                            >
+                              {receipt.displayName.charAt(0).toUpperCase()}
+                            </div>
+                          )
+                        ))}
+                      </div>
+                      {readReceipts.length > 3 && (
+                        <span style={{ fontSize: '0.625rem', color: 'var(--color-textMuted)' }}>
+                          +{readReceipts.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             }
@@ -1172,6 +1438,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
             return (
               <div
                 key={eventId}
+                data-event-id={eventId}
                 className="group"
               >
                 <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
@@ -1224,15 +1491,15 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                           </div>
                         ) : (
                           <>
-                            {/* Text content - only show if not media-only or if it has a caption */}
-                            {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video')) && (
+                            {/* Text content - only show if not media-only or if it has a caption (but not for stickers) */}
+                            {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video' && eventType !== 'm.sticker')) && (
                               <div className="markdown-body">
                                 {renderMessageWithMentions(content.body || '')}
                               </div>
                             )}
                             
-                            {/* Media content (images, videos, files) */}
-                            {client && <MediaRenderer content={content} client={client} />}
+                            {/* Media content (images, videos, files, stickers) */}
+                            {client && <MediaRenderer content={content} client={client} eventType={eventType} />}
                             
                             {/* URL Previews */}
                             {content.body && content.msgtype === 'm.text' && extractUrls(content.body).map((url, idx) => (
@@ -1481,6 +1748,43 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                       <span className="text-xs text-slate-500 mt-1">
                         {format(timestamp, 'HH:mm')}
                       </span>
+                    )}
+                    
+                    {/* Read Receipts - show who has read up to this message */}
+                    {readReceipts.length > 0 && (
+                      <div className="flex items-center gap-1 mt-1 justify-end">
+                        <div className="flex items-center">
+                          {readReceipts.slice(0, 3).map((receipt, index) => (
+                            receipt.avatarUrl ? (
+                              <img
+                                key={receipt.userId}
+                                src={receipt.avatarUrl}
+                                alt={receipt.displayName}
+                                title={`Read by ${receipt.displayName}`}
+                                className="w-4 h-4 rounded-full object-cover border border-slate-700"
+                                style={{ marginLeft: index > 0 ? '-6px' : '0' }}
+                              />
+                            ) : (
+                              <div
+                                key={receipt.userId}
+                                title={`Read by ${receipt.displayName}`}
+                                className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-semibold border border-slate-700"
+                                style={{
+                                  backgroundColor: getUserColor(receipt.userId),
+                                  marginLeft: index > 0 ? '-6px' : '0'
+                                }}
+                              >
+                                {receipt.displayName.charAt(0).toUpperCase()}
+                              </div>
+                            )
+                          ))}
+                        </div>
+                        {readReceipts.length > 3 && (
+                          <span className="text-[10px] text-slate-400">
+                            +{readReceipts.length - 3}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
