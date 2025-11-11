@@ -95,12 +95,36 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       try {
         // Check if Olm is already loaded
         if (!(window as any).Olm) {
-          // Load Olm library dynamically - use the default export
-          const OlmModule = (await import('@matrix-org/olm')).default;
-          const Olm = await OlmModule();
+          // Load Olm library dynamically
+          const olmLib = await import('@matrix-org/olm');
+          
+          console.log('olmLib:', olmLib);
+          console.log('olmLib.default:', olmLib.default);
+          console.log('olmLib keys:', Object.keys(olmLib));
+          
+          // The Olm library is a function that returns a promise
+          let Olm;
+          if (typeof olmLib.default === 'function') {
+            // Call the function and await the result
+            Olm = await olmLib.default();
+            console.log('Olm loaded (pattern 1 - function call)');
+          } else if (typeof olmLib === 'function') {
+            // Sometimes it's the module itself that's the function
+            Olm = await (olmLib as any)();
+            console.log('Olm loaded (pattern 2 - module function)');
+          } else {
+            // Use default if it exists
+            Olm = olmLib.default || olmLib;
+            console.log('Olm loaded (pattern 3 - direct)');
+          }
+          
           (window as any).Olm = Olm;
-          console.log('Olm library loaded');
         }
+        
+        // Verify Olm is properly loaded
+        console.log('window.Olm:', (window as any).Olm);
+        console.log('window.Olm type:', typeof (window as any).Olm);
+        console.log('window.Olm.init exists?', !!(window as any).Olm?.init);
         
         await loggedInClient.initCrypto();
         console.log('✅ Crypto initialized successfully');
@@ -114,6 +138,12 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.error('❌ Failed to initialize crypto:', error);
         console.error('Error details:', error);
       }
+      
+      // Listen for session invalidation (e.g., force logout from another client)
+      loggedInClient.on('Session.logged_out' as any, () => {
+        console.log('⚠️ Session invalidated - logging out');
+        logout();
+      });
 
       // Store credentials
       localStorage.setItem('mx_homeserver', homeserver);
@@ -187,14 +217,28 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const logout = async () => {
     if (client) {
-      await client.logout();
-      client.stopClient();
+      try {
+        // Try to logout from the server, but don't fail if it doesn't work
+        await client.logout();
+      } catch (error: any) {
+        // If logout fails (e.g., session already invalidated), that's okay
+        console.log('Logout API call failed (session may already be invalidated):', error.message);
+      }
+      
+      // Always clean up local state regardless of API success
+      try {
+        client.stopClient();
+      } catch (error) {
+        console.log('Error stopping client:', error);
+      }
+      
       setClient(null);
       setIsLoggedIn(false);
       setCurrentRoom(null);
       setRooms([]);
       setSpaces([]);
       setNeedsVerification(false);
+      setVerificationRequest(null);
       localStorage.removeItem('mx_homeserver');
       localStorage.removeItem('mx_access_token');
       localStorage.removeItem('mx_user_id');
@@ -316,12 +360,30 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           try {
             // Check if Olm is already loaded
             if (!(window as any).Olm) {
-              // Load Olm library dynamically - use the default export
-              const OlmModule = (await import('@matrix-org/olm')).default;
-              const Olm = await OlmModule();
-              (window as any).Olm = Olm;
-              console.log('Olm library loaded (restored session)');
+              // Load Olm library dynamically
+              const olmLib = await import('@matrix-org/olm');
+              
+              // Try different import patterns
+              if (typeof olmLib.default === 'function') {
+                // Pattern 1: default export is init function
+                const Olm = await olmLib.default();
+                (window as any).Olm = Olm;
+                console.log('Olm loaded (pattern 1 - function) [restored]');
+              } else if (olmLib.default?.init) {
+                // Pattern 2: default export has init method
+                await olmLib.default.init();
+                (window as any).Olm = olmLib.default;
+                console.log('Olm loaded (pattern 2 - init method) [restored]');
+              } else {
+                // Pattern 3: default export is Olm itself
+                (window as any).Olm = olmLib.default;
+                console.log('Olm loaded (pattern 3 - direct) [restored]');
+              }
             }
+            
+            // Verify Olm is properly loaded
+            console.log('window.Olm [restored]:', (window as any).Olm);
+            console.log('window.Olm type [restored]:', typeof (window as any).Olm);
             
             await restoredClient.initCrypto();
             console.log('✅ Crypto initialized successfully (restored session)');
@@ -335,6 +397,12 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.error('❌ Failed to initialize crypto (restored session):', error);
             console.error('Error details:', error);
           }
+          
+          // Listen for session invalidation (e.g., force logout from another client)
+          restoredClient.on('Session.logged_out' as any, () => {
+            console.log('⚠️ Session invalidated - logging out');
+            logout();
+          });
 
           if (!mounted) return;
 

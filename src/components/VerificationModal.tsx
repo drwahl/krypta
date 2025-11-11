@@ -13,23 +13,35 @@ const VerificationModal: React.FC = () => {
 
     const handleAccept = async () => {
       try {
-        console.log('🔐 Starting verification...');
-        const v = verificationRequest.beginKeyVerification('m.sas.v1');
+        console.log('🔐 Accepting verification request...');
+        console.log('Request object:', verificationRequest);
+        
+        // Accept the verification request first
+        await verificationRequest.accept();
+        console.log('✅ Verification request accepted');
+        
+        // Get the verifier from the request
+        const v = verificationRequest.verifier;
+        if (!v) {
+          console.error('❌ No verifier available');
+          return;
+        }
+        
         setVerifier(v);
 
+        // Listen for SAS emojis
         v.on('show_sas', (e: any) => {
           console.log('🔐 SAS emojis received:', e.sas.emoji);
           setSasEmojis(e.sas.emoji || []);
           setStep('showing_sas');
         });
 
-        v.on('show_reciprocate_qr', () => {
-          console.log('🔐 QR code verification');
-        });
-
+        // Start the verification
         await v.verify();
+        console.log('✅ Verification started');
       } catch (error) {
         console.error('❌ Verification error:', error);
+        console.error('Error details:', error);
       }
     };
 
