@@ -30,24 +30,34 @@ export class ThreadManager {
 
   /**
    * Create a new thread
+   * @param rootEventId - Matrix event ID for the thread root (use as thread ID)
+   * @param roomId - Matrix room ID
+   * @param title - Thread title
+   * @param description - Optional thread description
+   * @param isMatrixNative - Whether this is a Matrix-native thread (default: true)
+   * @param createdBy - User ID who created the thread
    */
   createThread(
-    id: string,
+    rootEventId: string,
     roomId: string,
     title: string,
-    description?: string
+    description?: string,
+    isMatrixNative: boolean = true,
+    createdBy?: string
   ): Thread {
     const thread: Thread = {
-      id,
+      id: rootEventId,
+      rootEventId,
       roomId,
       title,
       description,
+      isMatrixNative,
       participants: new Set(),
       tags: [],
       topics: [],
       messages: new Map(),
       mainBranch: {
-        id: `${id}-main`,
+        id: `${rootEventId}-main`,
         topic: 'Main Discussion',
         createdAt: Date.now(),
         messageIds: [],
@@ -56,9 +66,11 @@ export class ThreadManager {
       relatedThreadIds: new Set(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      createdBy,
+      metadata: {},
     };
 
-    this.threads.set(id, thread);
+    this.threads.set(rootEventId, thread);
     return thread;
   }
 
@@ -97,10 +109,10 @@ export class ThreadManager {
    */
   createBranch(
     threadId: string,
-    parentMessageId: string,
     topic: string,
-    description?: string
-  ): ThreadBranch | null {
+    description?: string,
+    parentMessageId?: string
+  ): string | null {
     const thread = this.threads.get(threadId);
     if (!thread) return null;
 
@@ -117,7 +129,7 @@ export class ThreadManager {
     thread.branches.set(branchId, branch);
     thread.updatedAt = Date.now();
 
-    return branch;
+    return branchId;
   }
 
   /**

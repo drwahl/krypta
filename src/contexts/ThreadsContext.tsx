@@ -55,7 +55,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isLoading, setIsLoading] = useState(false);
   const [updateTrigger, setUpdateTrigger] = useState(0);
 
-  // Initialize managers and load persisted threads ONCE
+  // Initialize managers and load threads
   useEffect(() => {
     const initializeThreading = async () => {
       if (!threadManagerRef.current) {
@@ -82,17 +82,159 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
               persistedThreads.forEach((thread) => {
                 threadManagerRef.current?.threads.set(thread.id, thread);
               });
-              hasLoadedRef.current = true;
             }
+            hasLoadedRef.current = true;
           } catch (error) {
             console.error('Failed to load persisted threads:', error);
           }
         }
       }
+      
+      // Load Matrix threads from current room
+      if (currentRoom && threadSyncRef.current && threadManagerRef.current && client) {
+        console.log(`🔄 Loading Matrix threads from room: ${currentRoom.name}`);
+        const matrixThreads = threadSyncRef.current.loadThreadsFromRoom(currentRoom);
+        const metadata = threadSyncRef.current.loadAllThreadMetadata(currentRoom);
+        
+        console.log(`📊 Found ${matrixThreads.size} Matrix threads, ${metadata.size} with metadata`);
+        
+        // Convert Matrix threads to our Thread objects
+        const loadedThreads: Thread[] = [];
+        for (const [rootEventId, events] of matrixThreads.entries()) {
+          // Check if we already have this thread
+          let thread = threadManagerRef.current.getThread(rootEventId);
+          
+          if (!thread) {
+            // Get metadata from room state
+            const meta = metadata.get(rootEventId);
+            const rootEvent = threadSyncRef.current.getThreadRoot(currentRoom, rootEventId);
+            
+            const title = meta?.title || 'Untitled Thread';
+            const description = meta?.description;
+            
+            // Create thread with Matrix event ID
+            thread = threadManagerRef.current.createThread(
+              rootEventId,
+              currentRoom.roomId,
+              title,
+              description,
+              true,
+              meta?.createdBy
+            );
+            
+            // Add root message
+            if (rootEvent) {
+              const rootMessage = threadSyncRef.current.matrixEventToThreadMessage(rootEvent);
+              threadManagerRef.current.addMessageToThread(rootEventId, rootMessage);
+            }
+            
+            // Add threaded messages
+            for (const event of events) {
+              const message = threadSyncRef.current.matrixEventToThreadMessage(event);
+              threadManagerRef.current.addMessageToThread(rootEventId, message);
+            }
+            
+            loadedThreads.push(thread);
+          }
+        }
+        
+        if (loadedThreads.length > 0) {
+          console.log(`✅ Loaded ${loadedThreads.length} Matrix threads`);
+          setThreads((prev) => [...prev, ...loadedThreads]);
+        }
+      }
     };
 
     initializeThreading();
-  }, []);
+  }, [client, currentRoom]);
+  
+  // Listen for new messages in Matrix and auto-add to threads
+  useEffect(() => {
+    if (!client || !threadManagerRef.current || !threadSyncRef.current) return;
+    
+    const handleTimelineEvent = (
+      event: any,
+      room: any,
+      toStartOfTimeline: boolean
+    ) => {
+      // Only process new messages, not historical ones
+      if (toStartOfTimeline) return;
+      
+      // Only process room messages
+      if (event.getType() !== 'm.room.message') return;
+      
+      const content = event.getContent();
+      const relatesTo = content['m.relates_to'];
+      
+      // Check if this is a threaded message (MSC3440 format)
+      if (relatesTo?.rel_type === 'm.thread' && relatesTo.event_id) {
+        const threadRootEventId = relatesTo.event_id;
+        const eventId = event.getId();
+        
+        console.log(`📨 Received threaded message ${eventId} for thread: ${threadRootEventId}`);
+        console.log(`📨 Event content:`, content);
+        console.log(`📨 Relates to:`, relatesTo);
+        
+        // Get or create thread
+        let thread = threadManagerRef.current?.getThread(threadRootEventId);
+        
+        if (!thread) {
+          console.warn(`⚠️ Thread ${threadRootEventId} not found in local state, skipping auto-add`);
+          console.warn(`⚠️ Available threads:`, Array.from(threadManagerRef.current?.threads.keys() || []));
+          return;
+        }
+        
+        if (thread && threadSyncRef.current) {
+          // Convert Matrix event to ThreadMessage
+          const message = threadSyncRef.current.matrixEventToThreadMessage(event);
+          
+          console.log(`📥 Converting event to ThreadMessage:`, message);
+          
+          // Check if message already exists in thread
+          if (thread.messages.has(message.id)) {
+            console.log(`ℹ️ Message ${message.id} already in thread, skipping`);
+            return;
+          }
+          
+          // Add message to thread
+          const success = threadManagerRef.current?.addMessageToThread(
+            threadRootEventId,
+            message
+          );
+          
+          if (success) {
+            console.log(`✅ Auto-added message ${message.id} to thread ${threadRootEventId}`);
+            
+            // Update React state
+            const updatedThread = threadManagerRef.current?.getThread(threadRootEventId);
+            if (updatedThread) {
+              setThreads((prev) =>
+                prev.map((t) => (t.id === threadRootEventId ? { ...updatedThread } : t))
+              );
+              
+              // Update selected thread if it matches
+              setSelectedThread((prev) =>
+                prev?.id === threadRootEventId ? { ...updatedThread } : prev
+              );
+              
+              // Persist to storage
+              if (storageRef.current) {
+                storageRef.current.saveThread(updatedThread).catch(console.error);
+              }
+            }
+          } else {
+            console.error(`❌ Failed to add message to thread ${threadRootEventId}`);
+          }
+        }
+      }
+    };
+    
+    client.on('Room.timeline' as any, handleTimelineEvent);
+    
+    return () => {
+      client.removeListener('Room.timeline' as any, handleTimelineEvent);
+    };
+  }, [client]);
 
   const threadManager = threadManagerRef.current;
   const threadLinker = threadLinkerRef.current;
@@ -101,44 +243,68 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const createThread = useCallback(
     async (roomId: string, title: string, description?: string) => {
       if (!threadManager) return null;
-      
-      console.log(`🧵 Creating native Matrix thread: ${title}`);
-      
-      // Step 1: Send root message to Matrix
-      let rootEventId: string | null = null;
-      if (client && threadSyncRef.current) {
-        const rootContent = `📌 ${title}${description ? `\n\n${description}` : ''}`;
-        rootEventId = await threadSyncRef.current.createThreadRoot(roomId, rootContent);
-        
-        if (!rootEventId) {
-          console.error('Failed to create Matrix thread root');
-          return null;
-        }
-        
-        console.log(`✅ Matrix thread root created: ${rootEventId}`);
-        
-        // Step 2: Store metadata in room state
-        await threadSyncRef.current.storeThreadMetadata(roomId, rootEventId, {
-          title,
-          description,
-          createdBy: client.getUserId() || undefined,
-          createdAt: Date.now(),
-        });
-        
-        console.log(`✅ Thread metadata stored in Matrix`);
+      if (!client) {
+        console.error('Matrix client not initialized');
+        return null;
       }
       
-      // Step 3: Create local thread object
-      const threadId = rootEventId || `thread-${roomId}-${Date.now()}`;
-      const thread = threadManager.createThread(threadId, roomId, title, description);
+      console.log(`🧵 Creating native Matrix thread: "${title}"`);
+      console.log(`🧵 Room ID: ${roomId}`);
       
-      // Add root event ID to thread
-      if (rootEventId) {
-        thread.metadata = {
-          ...thread.metadata,
-          matrixRootEventId: rootEventId,
-        };
+      // Step 1: Send root message to Matrix (this is a regular message, NOT threaded)
+      const rootContent = `📌 ${title}${description ? `\n\n${description}` : ''}`;
+      const rootEventId = await threadSyncRef.current?.createThreadRoot(roomId, rootContent);
+      
+      if (!rootEventId) {
+        console.error('❌ Failed to create Matrix thread root - no event ID returned');
+        return null;
       }
+      
+      console.log(`✅ Matrix thread root created with event ID: ${rootEventId}`);
+      console.log(`📋 Root event ID format check: ${rootEventId.startsWith('$') ? 'VALID' : 'INVALID'}`);
+      
+      // Step 2: Store metadata in room state
+      await threadSyncRef.current?.storeThreadMetadata(roomId, rootEventId, {
+        title,
+        description,
+        createdBy: client.getUserId() || undefined,
+        createdAt: Date.now(),
+      });
+      
+      console.log(`✅ Thread metadata stored in Matrix`);
+      
+      // Step 3: Create local thread object (use rootEventId as thread ID)
+      const thread = threadManager.createThread(
+        rootEventId,
+        roomId,
+        title,
+        description,
+        true, // isMatrixNative
+        client.getUserId() || undefined
+      );
+      
+      // Step 3.5: Add root message to thread
+      const rootMessage = {
+        id: rootEventId,
+        eventId: rootEventId,
+        source: 'matrix' as const,
+        sender: {
+          id: client.getUserId() || 'unknown',
+          name: client.getUserId()?.split(':')[0].substring(1) || 'Unknown',
+        },
+        content: rootContent,
+        timestamp: Date.now(),
+        contextualObjects: [],
+      };
+      threadManager.addMessageToThread(rootEventId, rootMessage);
+      
+      console.log(`📊 Thread object created:`, {
+        id: thread.id,
+        rootEventId: thread.rootEventId,
+        title: thread.title,
+        isMatrixNative: thread.isMatrixNative,
+        messageCount: thread.messages.size,
+      });
       
       setThreads((prev) => [...prev, thread]);
       
@@ -147,7 +313,8 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         storageRef.current.saveThread(thread).catch(console.error);
       }
       
-      console.log(`✅ Thread created: ${threadId}`);
+      console.log(`✅ Thread created successfully with ID: ${rootEventId}`);
+      console.log(`📋 Thread is now in threadManager, total threads: ${threadManager.threads.size}`);
       return thread;
     },
     [threadManager, client]
@@ -224,9 +391,9 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const createBranch = useCallback(
-    (threadId: string, branchName: string, description?: string) => {
+    (threadId: string, branchName: string, description?: string, parentMessageId?: string) => {
       if (!threadManager) return null;
-      const branchId = threadManager.createBranch(threadId, branchName, description);
+      const branchId = threadManager.createBranch(threadId, branchName, description, parentMessageId);
       if (branchId) {
         const thread = threadManager.getThread(threadId);
         setThreads((prev) =>

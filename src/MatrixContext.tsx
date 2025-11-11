@@ -486,7 +486,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  const sendMessage = async (roomId: string, message: string) => {
+  const sendMessage = async (roomId: string, message: string, threadRootEventId?: string) => {
     if (!client) return;
     
     // Convert @mentions to Matrix.to links for proper protocol support
@@ -541,12 +541,25 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     }
     
-    const content = {
+    const content: any = {
       body: processedBody,
       msgtype: 'm.text',
       format: 'org.matrix.custom.html',
       formatted_body: processedHtml,
     };
+    
+    // Add thread relation if threadRootEventId is provided (MSC3440 format)
+    if (threadRootEventId) {
+      content['m.relates_to'] = {
+        rel_type: 'm.thread',
+        event_id: threadRootEventId,
+        is_falling_back: true,
+        'm.in_reply_to': {
+          event_id: threadRootEventId,
+        },
+      };
+      console.log(`📨 Sending message as thread reply to: ${threadRootEventId}`);
+    }
 
     await client.sendEvent(roomId, 'm.room.message', content);
   };

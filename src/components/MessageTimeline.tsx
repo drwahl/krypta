@@ -3,10 +3,11 @@ import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
-import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin } from 'lucide-react';
+import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin, MessageSquare } from 'lucide-react';
 import { MatrixEvent, Room, MatrixClient } from 'matrix-js-sdk';
 import UrlPreview from './UrlPreview';
 import { useElementCall } from '../hooks/useElementCall';
+import { useThreads } from '../contexts/ThreadsContext';
 
 interface MessageTimelineProps {
   room?: Room; // Optional room prop for multi-pane support
@@ -212,6 +213,7 @@ const extractUrls = (text: string): string[] => {
 const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => {
   const { currentRoom: contextRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
   const { theme } = useTheme();
+  const { threads, setSelectedThread } = useThreads();
   
   // Use prop if provided, otherwise fall back to context
   const currentRoom = roomProp || contextRoom;
@@ -630,9 +632,25 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
 
     const updateMessages = () => {
       const timelineEvents = currentRoom.getLiveTimeline().getEvents();
-      const messageEvents = timelineEvents.filter(
-        (event) => event.getType() === 'm.room.message' || event.getType() === 'm.sticker'
-      );
+      const messageEvents = timelineEvents.filter((event) => {
+        const eventType = event.getType();
+        
+        // Only show room messages and stickers
+        if (eventType !== 'm.room.message' && eventType !== 'm.sticker') {
+          return false;
+        }
+        
+        // Filter out threaded replies (but keep thread root messages)
+        const content = event.getContent();
+        const relatesTo = content['m.relates_to'];
+        
+        // If this message is a thread reply, don't show it in main timeline
+        if (relatesTo?.rel_type === 'm.thread') {
+          return false;
+        }
+        
+        return true;
+      });
       setMessages(messageEvents);
       
       // Log encryption status for debugging (only if there are failures)
@@ -912,6 +930,44 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     }
   };
 
+  // Get thread reply count for a message
+  const getThreadReplies = (event: MatrixEvent): { count: number; threadId: string | null } => {
+    if (!currentRoom) return { count: 0, threadId: null };
+    
+    try {
+      const eventId = event.getId();
+      if (!eventId) return { count: 0, threadId: null };
+      
+      // Check if this message is a thread root by looking for replies
+      const timeline = currentRoom.getLiveTimeline().getEvents();
+      const threadReplies = timeline.filter((e) => {
+        if (e.getType() !== 'm.room.message') return false;
+        const content = e.getContent();
+        const relatesTo = content['m.relates_to'];
+        return relatesTo?.rel_type === 'm.thread' && relatesTo.event_id === eventId;
+      });
+      
+      return {
+        count: threadReplies.length,
+        threadId: threadReplies.length > 0 ? eventId : null
+      };
+    } catch (error) {
+      console.error('Error getting thread replies:', error);
+      return { count: 0, threadId: null };
+    }
+  };
+  
+  // Open thread in sidebar
+  const openThread = (eventId: string) => {
+    const thread = threads.find(t => t.rootEventId === eventId);
+    if (thread) {
+      console.log(`📂 Opening thread: ${thread.title}`);
+      setSelectedThread(thread);
+    } else {
+      console.warn(`⚠️ Thread not found for event: ${eventId}`);
+    }
+  };
+
   if (!currentRoom) {
     return (
       <div className="flex-1 flex items-center justify-center bg-slate-900">
@@ -1034,6 +1090,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
             const eventType = event.getType();
             const reactions = getReactions(event);
             const readReceipts = getReadReceipts(event);
+            const threadReplies = getThreadReplies(event);
             const isOwn = sender === client?.getUserId();
             const isEncrypted = event.isEncrypted();
             const isDecryptionFailure = event.isDecryptionFailure();
@@ -1128,6 +1185,30 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                       </>
                     )}
                   </div>
+                  
+                  {/* Thread indicator in terminal style */}
+                  {threadReplies.count > 0 && (
+                    <button
+                      onClick={() => openThread(eventId)}
+                      style={{
+                        backgroundColor: 'var(--color-primary)',
+                        color: theme.name === 'terminal' ? '#000' : '#fff',
+                        padding: '0.125rem 0.375rem',
+                        fontSize: 'var(--sizing-textXs)',
+                        fontWeight: 'bold',
+                        border: '1px solid var(--color-primary)',
+                        cursor: 'pointer',
+                        marginLeft: '0.5rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                      }}
+                      title="View thread"
+                    >
+                      <MessageSquare size={12} />
+                      <span>{threadReplies.count}</span>
+                    </button>
+                  )}
                   
                   {/* Reactions in terminal style */}
                   {Object.keys(reactions).length > 0 && (
@@ -1695,6 +1776,18 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                             </div>
                           </div>
                         </>
+                      )}
+
+                      {/* Thread indicator */}
+                      {threadReplies.count > 0 && (
+                        <button
+                          onClick={() => openThread(eventId)}
+                          className="mt-1 px-2 py-1 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+                          title={`${threadReplies.count} ${threadReplies.count === 1 ? 'reply' : 'replies'}`}
+                        >
+                          <MessageSquare size={14} />
+                          <span>{threadReplies.count} {threadReplies.count === 1 ? 'reply' : 'replies'}</span>
+                        </button>
                       )}
 
                       {/* Reactions display */}

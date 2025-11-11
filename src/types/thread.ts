@@ -54,12 +54,17 @@ export interface ThreadBranch {
 
 /**
  * Represents a semantic container for related communication
+ * Uses Matrix's native m.thread relations for multi-user threading
  */
 export interface Thread {
-  id: string;
+  id: string; // Matrix root event ID (e.g., $event_id) for native threads
   roomId: string; // Primary room ID
   title: string;
   description?: string;
+  
+  // Matrix native threading
+  rootEventId: string; // Matrix event ID that started this thread
+  isMatrixNative: boolean; // True if synced with Matrix m.thread relations
   
   // Participants and metadata
   participants: Set<string>; // User IDs
@@ -79,12 +84,16 @@ export interface Thread {
   createdAt: number;
   updatedAt: number;
   archivedAt?: number;
+  createdBy?: string; // User ID who created the thread
   
   // AI/Summary (on-demand)
   summary?: string;
   summaryGeneratedAt?: number;
   keyPoints?: string[];
   actionItems?: string[];
+  
+  // Custom metadata (stored in room state)
+  metadata?: Record<string, any>;
 }
 
 /**

@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useThreads } from '../contexts/ThreadsContext';
 import { useMatrix } from '../MatrixContext';
-import { ThreadSync } from '../services/threadSync';
-import { Send, X } from 'lucide-react';
+import { Send } from 'lucide-react';
 
 /**
  * ThreadMessageInput Component
@@ -28,79 +27,76 @@ export const ThreadMessageInput: React.FC<ThreadMessageInputProps> = ({
     console.log('🚀 isSubmitting:', isSubmitting);
     
     e.preventDefault();
-    if (!content.trim()) {
-      console.log('❌ Content is empty, aborting');
+    if (!content.trim() || !client || !currentRoom) {
+      console.log('❌ Missing required data:', { 
+        hasContent: !!content.trim(), 
+        hasClient: !!client, 
+        hasRoom: !!currentRoom 
+      });
       return;
     }
 
     setIsSubmitting(true);
     try {
+      console.log(`🔍 Looking for thread with ID: ${threadId}`);
+      console.log(`🔍 ThreadManager available:`, !!threadManager);
+      console.log(`🔍 Total threads in manager:`, threadManager?.threads.size);
+      console.log(`🔍 All thread IDs:`, Array.from(threadManager?.threads.keys() || []));
+      
       // Get thread to find root event ID
       const thread = threadManager?.getThread(threadId);
       if (!thread) {
-        console.error('Thread not found');
+        console.error(`❌ Thread not found with ID: ${threadId}`);
+        console.error(`❌ Available threads:`, Array.from(threadManager?.threads.keys() || []));
+        setIsSubmitting(false);
+        return;
+      }
+      
+      console.log(`✅ Thread found:`, {
+        id: thread.id,
+        rootEventId: thread.rootEventId,
+        title: thread.title,
+        messageCount: thread.messages.size,
+      });
+
+      // Use the thread's rootEventId (which is a Matrix event ID)
+      const threadRootEventId = thread.rootEventId;
+      
+      if (!threadRootEventId || !threadRootEventId.startsWith('$')) {
+        console.error(`❌ Invalid thread root event ID: "${threadRootEventId}"`);
+        console.error(`❌ Expected format: $eventId, got: ${threadRootEventId}`);
         setIsSubmitting(false);
         return;
       }
 
-      // Create message object
-      const message = {
-        id: `msg-${Date.now()}`,
-        eventId: `msg-${Date.now()}`,
-        source: 'matrix' as const,
-        sender: {
-          id: client?.getUserId() || 'current-user',
-          name: client?.getUserId()?.split(':')[0] || 'You',
-          avatar: undefined,
+      console.log(`📨 Sending message to Matrix thread: ${threadRootEventId}`);
+      
+      // Send via Matrix with proper thread formatting for Element compatibility
+      // According to MSC3440, threaded messages need fallback for older clients
+      const messageContent = {
+        body: content.trim(),
+        msgtype: 'm.text',
+        'm.relates_to': {
+          rel_type: 'm.thread',
+          event_id: threadRootEventId,
+          is_falling_back: true,
+          'm.in_reply_to': {
+            event_id: threadRootEventId,
+          },
         },
-        content: content.trim(),
-        timestamp: Date.now(),
-        contextualObjects: [],
       };
-
-      // Try to send via Matrix thread if available
-      let sentViaMatrix = false;
-      if (client && currentRoom && thread.messages.size > 0) {
-        const threadSync = new ThreadSync(client);
-        
-        // Get the first message's event ID as the thread root
-        const firstMessage = Array.from(thread.messages.values())[0];
-        const threadRootEventId = firstMessage.eventId;
-
-        if (threadRootEventId && threadRootEventId.startsWith('$')) {
-          // Send via Matrix thread
-          const eventId = await threadSync.sendMessageToThread(
-            currentRoom.roomId,
-            content.trim(),
-            threadRootEventId
-          );
-
-          if (eventId) {
-            console.log('✅ Message sent to Matrix thread:', eventId);
-            // Update message with actual event ID
-            message.eventId = eventId;
-            sentViaMatrix = true;
-          }
-        }
-      }
-
-      // Always add to local thread (whether sent via Matrix or not)
-      console.log(`📝 Adding message to thread: ${threadId}`);
-      console.log(`📝 Message:`, message);
       
-      const success = await addMessage(threadId, message);
+      console.log('📤 Sending thread message:', messageContent);
+      const result = await client.sendEvent(currentRoom.roomId, 'm.room.message', messageContent);
+      console.log('✅ Message sent to Matrix thread successfully:', result);
       
-      console.log(`📝 addMessage returned: ${success}`);
+      // Note: The message will be picked up automatically by the room timeline listener
+      // and added to the thread by the ThreadsContext
       
-      if (success) {
-        setContent('');
-        onMessageAdded?.();
-        console.log(`✅ Message added to thread (via ${sentViaMatrix ? 'Matrix' : 'local'})`);
-      } else {
-        console.error('❌ Failed to add message to thread');
-      }
+      setContent('');
+      onMessageAdded?.();
     } catch (error) {
-      console.error('Error adding message:', error);
+      console.error('Error sending message:', error);
     } finally {
       setIsSubmitting(false);
     }

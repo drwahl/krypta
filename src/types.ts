@@ -10,7 +10,7 @@ export interface MatrixContextType {
   setCurrentRoom: (room: Room | null) => void;
   rooms: Room[];
   spaces: Room[];
-  sendMessage: (roomId: string, message: string) => Promise<void>;
+  sendMessage: (roomId: string, message: string, threadRootEventId?: string) => Promise<void>;
   sendReaction: (roomId: string, eventId: string, emoji: string) => Promise<void>;
   deleteMessage: (roomId: string, eventId: string) => Promise<void>;
   loadMoreHistory: (room: Room) => Promise<boolean>;

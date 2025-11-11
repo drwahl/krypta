@@ -44,6 +44,10 @@ export class ThreadSync {
         'm.relates_to': {
           rel_type: 'm.thread',
           event_id: threadRootEventId,
+          is_falling_back: true,
+          'm.in_reply_to': {
+            event_id: threadRootEventId,
+          },
         },
       };
 
