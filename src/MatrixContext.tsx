@@ -235,6 +235,43 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.log('Error stopping client:', error);
       }
       
+      // Clear crypto stores from IndexedDB
+      try {
+        const userId = client.getUserId();
+        console.log('Clearing crypto stores for user:', userId);
+        
+        // Delete all Matrix-related IndexedDB databases
+        const dbNames = [
+          'matrix-js-sdk:crypto',
+          'matrix-js-sdk:riot-web-sync',
+          `matrix-js-sdk:crypto:${userId}`,
+        ];
+        
+        for (const dbName of dbNames) {
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const deleteRequest = indexedDB.deleteDatabase(dbName);
+              deleteRequest.onsuccess = () => {
+                console.log(`✅ Deleted IndexedDB: ${dbName}`);
+                resolve();
+              };
+              deleteRequest.onerror = () => {
+                console.warn(`⚠️ Could not delete IndexedDB: ${dbName}`);
+                resolve(); // Don't fail logout if DB deletion fails
+              };
+              deleteRequest.onblocked = () => {
+                console.warn(`⚠️ IndexedDB deletion blocked: ${dbName}`);
+                resolve(); // Don't fail logout if DB deletion is blocked
+              };
+            });
+          } catch (error) {
+            console.warn(`Error deleting ${dbName}:`, error);
+          }
+        }
+      } catch (error) {
+        console.warn('Error clearing crypto stores:', error);
+      }
+      
       setClient(null);
       setIsLoggedIn(false);
       setCurrentRoom(null);
@@ -317,6 +354,54 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       verificationRequest.cancel();
       setVerificationRequest(null);
       console.log('❌ Verification cancelled');
+    }
+  };
+
+  const startVerification = async () => {
+    if (!client) {
+      console.error('❌ No client available');
+      return;
+    }
+
+    try {
+      const crypto = client.getCrypto();
+      if (!crypto) {
+        console.error('❌ Crypto not available');
+        alert('Encryption not initialized');
+        return;
+      }
+
+      const userId = client.getUserId();
+      const deviceId = client.getDeviceId();
+      if (!userId) {
+        console.error('❌ No user ID');
+        return;
+      }
+
+      console.log('🔐 Current device:', deviceId);
+      console.log('🔐 Requesting verification with other devices...');
+      
+      // Get list of other devices to verify we have more than just this one
+      const devices = await crypto.getUserDeviceInfo([userId]);
+      const userDevices = devices.get(userId);
+      const otherDevices = Array.from(userDevices?.keys() || []).filter(id => id !== deviceId);
+      
+      console.log('📱 Other devices:', otherDevices);
+      
+      if (otherDevices.length === 0) {
+        alert('No other devices found to verify with. Please log in with another client (like Element) first.');
+        return;
+      }
+      
+      // Request verification with the user (SDK will automatically exclude this device)
+      const request = await crypto.requestOwnUserVerification();
+      console.log('✅ Verification request sent:', request);
+      
+      // The verification request will be picked up by the listener we already have
+      setVerificationRequest(request);
+    } catch (error: any) {
+      console.error('❌ Error starting verification:', error);
+      alert(`Failed to start verification: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -498,6 +583,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     verificationRequest,
     acceptVerification,
     cancelVerification,
+    startVerification,
     isLoading,
   };
 

@@ -16,6 +16,7 @@ export interface MatrixContextType {
   verificationRequest: any | null;
   acceptVerification: () => Promise<void>;
   cancelVerification: () => void;
+  startVerification: () => Promise<void>;
   isLoading: boolean;
 }
 
