@@ -2,22 +2,30 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { Send, Paperclip, Smile } from 'lucide-react';
+import { Room } from 'matrix-js-sdk';
 
 interface UserSuggestion {
   userId: string;
   displayName: string;
 }
 
-const MessageInput: React.FC = () => {
-  const { currentRoom, sendMessage, client } = useMatrix();
+interface MessageInputProps {
+  room?: Room; // Optional room prop for multi-pane support
+}
+
+const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
+  const { currentRoom: contextRoom, sendMessage, client } = useMatrix();
   const { theme } = useTheme();
+  
+  // Use prop if provided, otherwise fall back to context
+  const currentRoom = roomProp || contextRoom;
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [userSuggestions, setUserSuggestions] = useState<UserSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentionStart, setMentionStart] = useState<number>(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const typingTimeoutRef = useRef<number>();
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

@@ -88,8 +88,8 @@ const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
         />
       )}
       
-      <MessageTimeline />
-      <MessageInput />
+      <MessageTimeline room={room} />
+      <MessageInput room={room} />
     </div>
   );
 };

@@ -4,11 +4,18 @@ import { useTheme } from '../ThemeContext';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X } from 'lucide-react';
-import { MatrixEvent } from 'matrix-js-sdk';
+import { MatrixEvent, Room } from 'matrix-js-sdk';
 
-const MessageTimeline: React.FC = () => {
-  const { currentRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
+interface MessageTimelineProps {
+  room?: Room; // Optional room prop for multi-pane support
+}
+
+const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => {
+  const { currentRoom: contextRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
   const { theme } = useTheme();
+  
+  // Use prop if provided, otherwise fall back to context
+  const currentRoom = roomProp || contextRoom;
   const [messages, setMessages] = useState<MatrixEvent[]>([]);
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
