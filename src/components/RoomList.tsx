@@ -257,9 +257,15 @@ const RoomList: React.FC = () => {
     const avatarUrl = getRoomAvatarUrl(room, client, 32);
     const initials = getRoomInitials(room.name);
 
-    const displayName = theme.style.showRoomPrefix 
-      ? `${theme.style.roomPrefix}${room.name}`
-      : room.name;
+    // Determine if this is a DM (2 members total, including self)
+    const isDM = members === 2;
+    
+    // Build display name with Unix-style paths for terminal theme
+    let displayName = room.name;
+    if (theme.style.showRoomPrefix) {
+      const prefix = isDM ? '/home/' : '/usr/bin/';
+      displayName = `${prefix}${room.name}`;
+    }
 
     return (
       <button
@@ -271,9 +277,10 @@ const RoomList: React.FC = () => {
         onDragEnd={handleDragEnd}
         className={`w-full flex items-center transition ${
           isActive ? 'border-l-2' : ''
-        } ${indent ? 'pl-8' : ''}`}
+        }`}
         style={{
           padding: theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '0.75rem 1rem',
+          paddingLeft: indent ? (theme.style.compactMode ? '2rem' : '2.5rem') : (theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '1rem'),
           gap: theme.style.compactMode ? 'var(--spacing-roomItemGap)' : '0.5rem',
           backgroundColor: isActive ? 'var(--color-hover)' : (isOpen ? 'var(--color-bgTertiary)' : 'transparent'),
           borderLeftColor: isActive ? 'var(--color-primary)' : (isOpen ? 'var(--color-accent)' : 'transparent'),
@@ -305,35 +312,31 @@ const RoomList: React.FC = () => {
           />
         )}
         
-        {/* Room Avatar or Initials - Hide in compact mode */}
-        {!theme.style.compactMode && (
-          <>
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={room.name}
-                className="flex-shrink-0 object-cover"
-                style={{
-                  width: 'var(--sizing-avatarSizeSmall)',
-                  height: 'var(--sizing-avatarSizeSmall)',
-                  borderRadius: 'var(--sizing-borderRadius)',
-                }}
-              />
-            ) : (
-              <div 
-                className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
-                style={{
-                  width: 'var(--sizing-avatarSizeSmall)',
-                  height: 'var(--sizing-avatarSizeSmall)',
-                  borderRadius: 'var(--sizing-borderRadius)',
-                  fontSize: 'var(--sizing-textXs)',
-                  color: 'var(--color-text)',
-                }}
-              >
-                {initials}
-              </div>
-            )}
-          </>
+        {/* Room Avatar or Initials - Show smaller in compact mode */}
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={room.name}
+            className="flex-shrink-0 object-cover"
+            style={{
+              width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+              height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+              borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
+            }}
+          />
+        ) : (
+          <div 
+            className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
+            style={{
+              width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+              height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+              borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
+              fontSize: theme.style.compactMode ? '0.5rem' : 'var(--sizing-textXs)',
+              color: 'var(--color-text)',
+            }}
+          >
+            {initials}
+          </div>
         )}
         <div className="flex-1 min-w-0 text-left flex items-center" style={{ gap: '0.25rem' }}>
           <p 
@@ -535,7 +538,14 @@ const RoomList: React.FC = () => {
                     )}
                     <Home className="w-4 h-4 text-slate-400" />
                     <div className="flex-1 min-w-0 text-left">
-                      <p className="text-sm font-medium text-slate-300">Direct Messages & Other</p>
+                      <p 
+                        className="text-sm font-medium text-slate-300"
+                        style={{
+                          fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
+                        }}
+                      >
+                        {theme.style.compactMode ? 'cd ~' : 'Direct Messages & Other'}
+                      </p>
                     </div>
                     <span className="text-xs text-slate-500">({filteredOrphanRooms.length})</span>
                     {totalUnread > 0 && (
@@ -608,16 +618,32 @@ const RoomList: React.FC = () => {
                         <img
                           src={spaceAvatarUrl}
                           alt={space.name}
-                          className="w-6 h-6 rounded-md flex-shrink-0 object-cover"
+                          className="rounded-md flex-shrink-0 object-cover"
+                          style={{
+                            width: theme.style.compactMode ? '1rem' : '1.5rem',
+                            height: theme.style.compactMode ? '1rem' : '1.5rem',
+                          }}
                         />
                       ) : (
-                        <div className="w-6 h-6 rounded-md bg-primary-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                        <div 
+                          className="rounded-md bg-primary-500 flex items-center justify-center text-white font-semibold flex-shrink-0"
+                          style={{
+                            width: theme.style.compactMode ? '1rem' : '1.5rem',
+                            height: theme.style.compactMode ? '1rem' : '1.5rem',
+                            fontSize: theme.style.compactMode ? '0.5rem' : '0.75rem',
+                          }}
+                        >
                           {spaceInitials}
                         </div>
                       );
                     })()}
                     <div className="flex-1 min-w-0 text-left">
-                      <p className="text-sm font-semibold text-white truncate">
+                      <p 
+                        className="text-sm font-semibold text-white truncate"
+                        style={{
+                          fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
+                        }}
+                      >
                         {space.name}
                       </p>
                     </div>

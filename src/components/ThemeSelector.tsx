@@ -3,7 +3,7 @@ import { useTheme } from '../ThemeContext';
 import { Palette, Check } from 'lucide-react';
 
 const ThemeSelector: React.FC = () => {
-  const { theme, themeName, setTheme, availableThemes } = useTheme();
+  const { theme, defaultThemeName, setTheme, availableThemes } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -12,10 +12,15 @@ const ThemeSelector: React.FC = () => {
         onClick={() => setIsOpen(!isOpen)}
         className="w-full px-4 py-2 flex items-center gap-2 hover:bg-[var(--color-hover)] transition rounded-lg"
         style={{ color: 'var(--color-text)' }}
-        title="Change theme"
+        title={`Global UI Theme: ${theme.displayName} (controls sidebar and UI chrome)`}
       >
         <Palette className="w-5 h-5" />
-        <span className="text-sm font-medium">{theme.displayName}</span>
+        <div className="flex-1 text-left">
+          <span className="text-sm font-medium">{theme.displayName}</span>
+          <div className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+            Global UI Theme
+          </div>
+        </div>
       </button>
 
       {isOpen && (
@@ -45,7 +50,7 @@ const ThemeSelector: React.FC = () => {
                 style={{ color: 'var(--color-text)' }}
               >
                 <span className="font-medium">{t.displayName}</span>
-                {themeName === t.name && (
+                {defaultThemeName === t.name && (
                   <Check className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
                 )}
               </button>

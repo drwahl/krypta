@@ -6,10 +6,26 @@ import ReactMarkdown from 'react-markdown';
 import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin } from 'lucide-react';
 import { MatrixEvent, Room, MatrixClient } from 'matrix-js-sdk';
 import UrlPreview from './UrlPreview';
+import { useElementCall } from '../hooks/useElementCall';
 
 interface MessageTimelineProps {
   room?: Room; // Optional room prop for multi-pane support
 }
+
+// Generate consistent color from username using simple hash
+const getUserColor = (username: string): string => {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  // Generate HSL color with good saturation and lightness for readability
+  const hue = Math.abs(hash) % 360;
+  const saturation = 65 + (Math.abs(hash) % 20); // 65-85%
+  const lightness = 55 + (Math.abs(hash) % 15); // 55-70%
+  
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+};
 
 // Media renderer component - defined outside to prevent recreation on every render
 const MediaRenderer = React.memo<{ content: any; client: MatrixClient }>(({ content, client }) => {
@@ -119,10 +135,18 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   const [selectedCategory, setSelectedCategory] = useState('Smileys'); // Track selected emoji category
   const [customEmojis, setCustomEmojis] = useState<Array<{ mxcUrl: string; name: string; blobUrl?: string }>>([]); // Custom uploaded emojis
   const [isUploading, setIsUploading] = useState(false);
-  const [showCallFrame, setShowCallFrame] = useState(false); // Track if Element Call is embedded
-  const [callUrl, setCallUrl] = useState<string>(''); // Store the call URL
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const callIframeRef = useRef<HTMLIFrameElement>(null);
+  
+  // Element Call integration via hook
+  const {
+    isElementCallRoom: hasElementCall,
+    showCallFrame,
+    callUrl,
+    isLoading: isJoiningCall,
+    iframeRef: callIframeRef,
+    joinCall: joinElementCall,
+    leaveCall: leaveElementCall,
+  } = useElementCall(currentRoom, client);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesStartRef = useRef<HTMLDivElement>(null);
 
@@ -279,251 +303,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     return parts.length > 0 ? parts : text;
   };
 
-  // Check if the current room has Element Call enabled
-  const isElementCallRoom = () => {
-    if (!currentRoom) return false;
-    
-    // Check for Element Call room type (org.matrix.msc3401.call or io.element.call)
-    const createEvent = currentRoom.currentState.getStateEvents('m.room.create', '');
-    const roomType = createEvent?.getContent()?.type;
-    if (roomType === 'org.matrix.msc3401.call' || roomType === 'io.element.call') {
-      return true;
-    }
-    
-    // Check for Element Call widget state events (multiple possible event types)
-    const widgetEventTypes = [
-      'im.vector.modular.widgets',
-      'io.element.widgets.layout',
-      'm.widgets'
-    ];
-    
-    for (const eventType of widgetEventTypes) {
-      const widgetEvents = currentRoom.currentState.getStateEvents(eventType);
-      if (widgetEvents && widgetEvents.length > 0) {
-        // Check if any widget is an Element Call widget
-        for (const event of widgetEvents) {
-          const content = event.getContent();
-          const url = content?.url || '';
-          const type = content?.type || '';
-          
-          if (url.includes('element.io/call') || 
-              url.includes('call.element.io') ||
-              type === 'jitsi' ||
-              type === 'io.element.call') {
-            return true;
-          }
-        }
-      }
-    }
-    
-    // Check room name for common video call patterns (fallback)
-    const roomName = currentRoom.name?.toLowerCase() || '';
-    if (roomName.includes('video room') || 
-        roomName.includes('video call') || 
-        roomName.includes('call room')) {
-      return true;
-    }
-    
-    return false;
-  };
-
-  // Join Element Call
-  const joinElementCall = async () => {
-    if (!currentRoom || !client) return;
-    
-    const roomId = currentRoom.roomId;
-    const homeserver = client.getHomeserverUrl();
-    const accessToken = client.getAccessToken();
-    const userId = client.getUserId();
-    const displayName = client.getUser(userId || '')?.displayName || userId;
-    const deviceId = client.getDeviceId();
-    
-    console.log('🎥 Attempting to join Element Call...');
-    console.log('🎥 Room:', currentRoom.name, '(' + roomId + ')');
-    
-    let callUrl = '';
-    let existingCallId = '';
-    
-    // Check for existing active calls in the room
-    // Element Call uses org.matrix.msc3401.call and org.matrix.msc3401.call.member events
-    try {
-      const callStateEvents = currentRoom.currentState.getStateEvents('org.matrix.msc3401.call');
-      console.log('🔍 Checking for active calls in room...');
-      
-      if (callStateEvents && callStateEvents.length > 0) {
-        for (const event of callStateEvents) {
-          const content = event.getContent();
-          const stateKey = event.getStateKey();
-          
-          // Check if this call is active (not terminated)
-          if (content && !content['m.terminated'] && stateKey) {
-            existingCallId = stateKey; // The state key IS the call ID
-            console.log('✅ Found existing active call:', existingCallId);
-            break;
-          }
-        }
-      }
-      
-      if (!existingCallId) {
-        console.log('⚠️ No active call found, Element Call will create a new one');
-      }
-    } catch (error) {
-      console.warn('Failed to check for existing calls:', error);
-    }
-    
-    // First check if there's a specific Element Call widget in the room
-    const widgetEvents = currentRoom.currentState.getStateEvents('im.vector.modular.widgets');
-    
-    if (widgetEvents && widgetEvents.length > 0) {
-      for (const event of widgetEvents) {
-        const content = event.getContent();
-        const type = content?.type || '';
-        const url = content?.url || '';
-        const data = content?.data || {};
-        
-        console.log('🔍 Found widget:', { type, url: url.substring(0, 50) + '...' });
-        
-        // Look for Element Call widgets
-        if (type === 'io.element.call' || url.includes('element.io/call') || url.includes('call.element.io')) {
-          // Use the widget URL and substitute template variables
-          callUrl = url
-            .replace('$matrix_room_id', encodeURIComponent(roomId))
-            .replace('$matrix_user_id', encodeURIComponent(userId || ''))
-            .replace('$matrix_display_name', encodeURIComponent(displayName || ''))
-            .replace('$matrix_device_id', encodeURIComponent(deviceId || ''))
-            .replace('$org.matrix.msc3401.call_id', existingCallId || data?.call_id || '');
-          
-          console.log('✅ Found Element Call widget in room state');
-          break;
-        }
-      }
-    }
-    
-    // If no widget found, try wellknown configuration
-    if (!callUrl && homeserver) {
-      try {
-        const homeserverUrl = new URL(homeserver);
-        const wellknownUrl = `${homeserverUrl.protocol}//${homeserverUrl.host}/.well-known/matrix/client`;
-        
-        console.log('🔍 Checking .well-known/matrix/client at:', wellknownUrl);
-        
-        // Try to fetch wellknown with a timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-        
-        try {
-          const response = await fetch(wellknownUrl, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          
-          console.log('📥 .well-known response status:', response.status);
-          
-          if (response.ok) {
-            const data = await response.json();
-            console.log('📦 .well-known data:', data);
-            
-            // Check for Element Call configuration first
-            const elementCallUrl = data?.['io.element.call']?.url;
-            
-            if (elementCallUrl) {
-              callUrl = elementCallUrl;
-              console.log('✅ Found Element Call URL in .well-known:', elementCallUrl);
-            } else {
-              // Check for LiveKit configuration (newer standard)
-              const rtcFoci = data?.['org.matrix.msc4143.rtc_foci'];
-              console.log('🔍 rtc_foci in .well-known:', rtcFoci);
-              
-              if (rtcFoci && Array.isArray(rtcFoci) && rtcFoci.length > 0) {
-                const livekitFocus = rtcFoci.find((focus: any) => focus.type === 'livekit');
-                console.log('🔍 LiveKit focus found:', livekitFocus);
-                
-                if (livekitFocus?.livekit_service_url) {
-                  // When LiveKit is configured, we use Element Call with LiveKit backend
-                  callUrl = 'https://call.element.io'; // Use public Element Call UI with your LiveKit backend
-                  console.log('✅ Found LiveKit configuration:', livekitFocus.livekit_service_url);
-                  console.log('✅ Will use Element Call UI with your LiveKit backend');
-                }
-              }
-              
-              if (!callUrl) {
-                console.log('⚠️ No Element Call or LiveKit configuration in .well-known');
-              }
-            }
-          } else {
-            console.log('⚠️ .well-known returned status:', response.status);
-          }
-        } catch (fetchError: any) {
-          clearTimeout(timeoutId);
-          if (fetchError.name === 'AbortError') {
-            console.log('⏱️ .well-known request timed out after 5 seconds');
-          } else {
-            console.log('⚠️ .well-known request failed:', fetchError.message);
-          }
-        }
-      } catch (error) {
-        console.warn('❌ Failed to check .well-known:', error);
-      }
-    }
-    
-    // Final fallback to public Element Call
-    if (!callUrl) {
-      callUrl = 'https://call.element.io';
-      console.log('🎥 Using public Element Call (call.element.io) as fallback');
-    }
-    
-    // Construct the full call URL with proper widget parameters
-    // Element Call in widget mode: https://call.domain/?widget_id=...&parent_url=...#/room/!roomId?callId=...
-    
-    // If callUrl already has parameters (from widget), parse them
-    const parsedUrl = new URL(callUrl);
-    
-    // Widget mode parameters - these tell Element Call to use Widget API for auth
-    parsedUrl.searchParams.set('widgetId', 'element-call-' + roomId);
-    parsedUrl.searchParams.set('parentUrl', window.location.origin);
-    parsedUrl.searchParams.set('roomId', roomId); // CRITICAL: roomId as query param for widget mode
-    
-    // CRITICAL: baseUrl is the Matrix homeserver URL - required for widget mode
-    if (homeserver) {
-      parsedUrl.searchParams.set('baseUrl', homeserver);
-      console.log('📡 Passing baseUrl (homeserver) to Element Call:', homeserver);
-    }
-    
-    parsedUrl.searchParams.set('embed', 'true'); // Enable embedded mode
-    parsedUrl.searchParams.set('hideHeader', 'true'); // Hide the Element Call header
-    parsedUrl.searchParams.set('preload', 'true'); // Preload the call
-    parsedUrl.searchParams.set('skipLobby', 'true'); // Skip lobby
-    parsedUrl.searchParams.set('displayName', displayName || '');
-    parsedUrl.searchParams.set('userId', userId || '');
-    parsedUrl.searchParams.set('deviceId', deviceId || '');
-    
-    // If there's an existing call, pass the call ID as a parameter too
-    if (existingCallId) {
-      parsedUrl.searchParams.set('callId', existingCallId);
-      console.log('📞 Passing call ID as parameter:', existingCallId);
-    }
-    
-    // Build the hash/fragment for the room
-    // If there's an existing call, include the call ID so Element Call joins it
-    let callFragment = `/room/${encodeURIComponent(roomId)}`;
-    if (existingCallId) {
-      callFragment += `?callId=${encodeURIComponent(existingCallId)}`;
-      console.log('✅ Joining existing call with ID:', existingCallId);
-    } else {
-      console.log('⚠️ No call ID - Element Call will create a new call');
-    }
-    
-    // Construct final URL: base + query params + hash
-    const finalUrl = `${parsedUrl.origin}${parsedUrl.pathname}?${parsedUrl.searchParams.toString()}#${callFragment}`;
-    
-    console.log('🎥 Embedding Element Call in widget mode');
-    console.log('🎥 Base URL:', callUrl);
-    console.log('🎥 Room ID:', roomId);
-    console.log('🎥 Widget ID:', 'element-call-' + roomId);
-    console.log('🎥 Final URL:', finalUrl);
-    
-    // Set state to show the embedded call frame
-    setCallUrl(finalUrl);
-    setShowCallFrame(true);
-  };
+  // Element Call detection and joining is now handled by useElementCall hook
 
   // Fetch authenticated media for custom emojis (creates blob URLs for caching)
   const fetchAuthenticatedMedia = useCallback(async (mxcUrl: string): Promise<string | null> => {
@@ -672,124 +452,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   };
 
   // Close call frame when room changes
-  useEffect(() => {
-    setShowCallFrame(false);
-    setCallUrl('');
-  }, [currentRoom]);
-
-  // Handle Widget API communication with Element Call iframe
-  useEffect(() => {
-    if (!showCallFrame || !callIframeRef.current || !client) return;
-
-    const handleMessage = (event: MessageEvent) => {
-      // Security check: only accept messages from Element Call origin
-      const callOrigin = new URL(callUrl).origin;
-      if (event.origin !== callOrigin) {
-        console.log('❌ Ignoring message from wrong origin:', event.origin, 'expected:', callOrigin);
-        return;
-      }
-
-      const data = event.data;
-      
-      console.log('📨 Widget API message from Element Call:', data);
-      console.log('📨 Message origin:', event.origin);
-      console.log('📨 event.source === iframe.contentWindow:', event.source === callIframeRef.current?.contentWindow);
-
-      // Handle widget API requests - respond to the iframe directly
-      if (data.api === 'fromWidget' && callIframeRef.current?.contentWindow) {
-        const { requestId, action, widgetId } = data;
-        const targetWindow = callIframeRef.current.contentWindow;
-
-        // Respond to supported API versions
-        if (action === 'supported_api_versions') {
-          const response = {
-            api: 'toWidget',
-            widgetId: widgetId,
-            requestId: requestId,
-            data: {
-              supported_versions: ['0.0.2']  // Only claim to support 0.0.2
-            }
-          };
-          console.log('📤 Sending supported API versions response:', response);
-          console.log('📤 Target origin:', callOrigin);
-          console.log('📤 Using iframe.contentWindow directly');
-          
-          try {
-            targetWindow.postMessage(response, callOrigin);
-            console.log('✅ postMessage to iframe completed successfully');
-          } catch (e) {
-            console.error('❌ postMessage failed:', e);
-          }
-        }
-
-        // Respond to capabilities request
-        if (action === 'capabilities') {
-          const response = {
-            api: 'toWidget',
-            widgetId: widgetId,
-            requestId: requestId,
-            data: {
-              capabilities: [
-                'org.matrix.msc3401.call',
-                'org.matrix.msc3401.call.member',
-                'org.matrix.msc2762.timeline:*',
-                'org.matrix.msc2762.receive.event:m.room.message',
-                'org.matrix.msc2762.receive.state_event:m.room.member',
-                'org.matrix.msc2762.send.event:m.room.message',
-                'org.matrix.msc2762.send.state_event:m.room.member'
-              ]
-            }
-          };
-          targetWindow.postMessage(response, callOrigin);
-          console.log('✅ Sent capabilities response');
-        }
-
-        // Acknowledge content_loaded
-        if (action === 'content_loaded') {
-          const response = {
-            api: 'toWidget',
-            widgetId: widgetId,
-            requestId: requestId,
-            data: {}
-          };
-          targetWindow.postMessage(response, callOrigin);
-          console.log('✅ Acknowledged content_loaded');
-        }
-
-        // Respond to transport info request with auth credentials
-        if (action === 'transport') {
-          const response = {
-            api: 'toWidget',
-            widgetId: widgetId,
-            requestId: requestId,
-            data: {
-              homeserver: client.getHomeserverUrl(),
-              userId: client.getUserId(),
-              deviceId: client.getDeviceId(),
-              accessToken: client.getAccessToken()
-            }
-          };
-          targetWindow.postMessage(response, callOrigin);
-          console.log('✅ Sent transport/auth credentials');
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-
-    // Log when iframe loads (but don't send initial message - Element Call will initiate)
-    const iframe = callIframeRef.current;
-    const handleLoad = () => {
-      console.log('📞 Element Call iframe loaded, waiting for Widget API requests...');
-    };
-
-    iframe?.addEventListener('load', handleLoad);
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      iframe?.removeEventListener('load', handleLoad);
-    };
-  }, [showCallFrame, callUrl, client]);
+  // Call state management is now in useElementCall hook
 
   useEffect(() => {
     if (!currentRoom) {
@@ -1046,7 +709,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   }
 
   const isRoomEncrypted = currentRoom?.hasEncryptionStateEvent();
-  const hasElementCall = isElementCallRoom();
+  // hasElementCall is now provided by useElementCall hook
 
   return (
     <div 
@@ -1102,7 +765,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       {showCallFrame && callUrl && (
         <div className="relative bg-slate-900 border-b border-slate-700" style={{ height: '600px' }}>
           <button
-            onClick={() => setShowCallFrame(false)}
+            onClick={leaveElementCall}
             className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition font-medium shadow-lg flex items-center gap-2"
             title="Leave call"
           >
@@ -1121,7 +784,14 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+      <div 
+        className="flex-1 overflow-y-auto px-6 py-4"
+        style={{
+          gap: theme.style.compactMode ? '0.25rem' : '1rem',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {/* Infinite scroll sentinel - triggers loading when scrolled near top */}
         <div ref={messagesStartRef} style={{ height: '1px', marginBottom: '1rem' }} />
         
@@ -1150,6 +820,11 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
             const isEncrypted = event.isEncrypted();
             const isDecryptionFailure = event.isDecryptionFailure();
             const isRedacted = event.isRedacted();
+            
+            // Get user avatar
+            const senderUser = currentRoom?.getMember(sender || '');
+            const avatarMxc = senderUser?.getMxcAvatarUrl();
+            const avatarUrl = avatarMxc && client ? client.mxcUrlToHttp(avatarMxc, 32, 32, 'crop') : null;
 
             // Terminal-style rendering
             if (theme.style.messageStyle === 'terminal') {
@@ -1175,7 +850,31 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                   <span style={{ color: 'var(--color-textMuted)', flexShrink: 0 }}>
                     [{format(timestamp, 'HH:mm:ss')}]
                   </span>
-                  <span style={{ color: 'var(--color-accent)', flexShrink: 0, fontWeight: 'bold' }}>
+                  
+                  {/* User avatar (small) */}
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={sender || 'User'}
+                      className="rounded-full object-cover"
+                      style={{ width: '1.25rem', height: '1.25rem', flexShrink: 0 }}
+                    />
+                  ) : (
+                    <div 
+                      className="rounded-full flex items-center justify-center text-white font-semibold"
+                      style={{ 
+                        width: '1.25rem', 
+                        height: '1.25rem', 
+                        flexShrink: 0,
+                        backgroundColor: getUserColor(sender || 'user'),
+                        fontSize: '0.6rem'
+                      }}
+                    >
+                      {sender?.charAt(1).toUpperCase()}
+                    </div>
+                  )}
+                  
+                  <span style={{ color: getUserColor(sender || 'user'), flexShrink: 0, fontWeight: 'bold' }}>
                     {senderShort}
                   </span>
                   <span style={{ color: 'var(--color-textMuted)', flexShrink: 0 }}>$</span>
@@ -1479,10 +1178,26 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                   <div className={`max-w-2xl ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                     {!isOwn && (
                       <div className="flex items-center gap-2 mb-1">
-                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-xs font-semibold">
-                          {sender?.charAt(1).toUpperCase()}
-                        </div>
-                        <span className="text-sm font-medium text-slate-300">{sender}</span>
+                        {avatarUrl ? (
+                          <img
+                            src={avatarUrl}
+                            alt={sender || 'User'}
+                            className="w-6 h-6 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div 
+                            className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold"
+                            style={{ backgroundColor: getUserColor(sender || 'user') }}
+                          >
+                            {sender?.charAt(1).toUpperCase()}
+                          </div>
+                        )}
+                        <span 
+                          className="text-sm font-medium"
+                          style={{ color: getUserColor(sender || 'user') }}
+                        >
+                          {sender}
+                        </span>
                         <span className="text-xs text-slate-500">
                           {format(timestamp, 'HH:mm')}
                         </span>

@@ -158,31 +158,120 @@ const themes: Record<string, Theme> = {
 };
 
 interface ThemeContextType {
-  theme: Theme;
+  theme: Theme; // Global theme (for UI chrome)
   themeName: string;
+  defaultThemeName: string;
+  currentRoomId: string | null;
+  currentSpaceId: string | null;
+  getRoomThemeObject: (roomId: string, spaceId: string | null) => Theme; // Get theme object for a specific room
   setTheme: (themeName: string) => void;
+  setRoomTheme: (roomId: string, themeName: string) => void;
+  clearRoomTheme: (roomId: string) => void;
+  getRoomTheme: (roomId: string) => string | null;
+  setSpaceTheme: (spaceId: string, themeName: string) => void;
+  clearSpaceTheme: (spaceId: string) => void;
+  getSpaceTheme: (spaceId: string) => string | null;
+  setCurrentRoom: (roomId: string | null, spaceId?: string | null) => void;
   availableThemes: Theme[];
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [themeName, setThemeName] = useState<string>(() => {
-    return localStorage.getItem('nychatt_theme') || 'dark';
+  const [defaultThemeName, setDefaultThemeName] = useState<string>(() => {
+    return localStorage.getItem('nychatt_theme') || 'terminal';
   });
 
-  const theme = themes[themeName] || themes.dark;
+  const [roomThemeOverrides, setRoomThemeOverrides] = useState<Record<string, string>>(() => {
+    const stored = localStorage.getItem('nychatt_room_themes');
+    return stored ? JSON.parse(stored) : {};
+  });
+
+  const [spaceThemeOverrides, setSpaceThemeOverrides] = useState<Record<string, string>>(() => {
+    const stored = localStorage.getItem('nychatt_space_themes');
+    return stored ? JSON.parse(stored) : {};
+  });
+
+  const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+  const [currentSpaceId, setCurrentSpaceId] = useState<string | null>(null);
+
+  // Global theme always uses the default (for UI chrome)
+  const globalTheme = themes[defaultThemeName] || themes.terminal;
+  
+  // Room theme uses hierarchy for the active room: room > space > global
+  const roomThemeName = 
+    (currentRoomId && roomThemeOverrides[currentRoomId]) || 
+    (currentSpaceId && spaceThemeOverrides[currentSpaceId]) || 
+    defaultThemeName;
+  const roomTheme = themes[roomThemeName] || themes.terminal;
+  
+  // For backwards compatibility, 'theme' returns the global theme
+  const theme = globalTheme;
+  const themeName = defaultThemeName;
 
   const setTheme = (newThemeName: string) => {
     if (themes[newThemeName]) {
-      setThemeName(newThemeName);
+      setDefaultThemeName(newThemeName);
       localStorage.setItem('nychatt_theme', newThemeName);
     }
   };
 
+  const setRoomTheme = (roomId: string, themeName: string) => {
+    if (themes[themeName]) {
+      const newOverrides = { ...roomThemeOverrides, [roomId]: themeName };
+      setRoomThemeOverrides(newOverrides);
+      localStorage.setItem('nychatt_room_themes', JSON.stringify(newOverrides));
+    }
+  };
+
+  const clearRoomTheme = (roomId: string) => {
+    const newOverrides = { ...roomThemeOverrides };
+    delete newOverrides[roomId];
+    setRoomThemeOverrides(newOverrides);
+    localStorage.setItem('nychatt_room_themes', JSON.stringify(newOverrides));
+  };
+
+  const getRoomTheme = (roomId: string): string | null => {
+    return roomThemeOverrides[roomId] || null;
+  };
+
+  const setSpaceTheme = (spaceId: string, themeName: string) => {
+    if (themes[themeName]) {
+      const newOverrides = { ...spaceThemeOverrides, [spaceId]: themeName };
+      setSpaceThemeOverrides(newOverrides);
+      localStorage.setItem('nychatt_space_themes', JSON.stringify(newOverrides));
+    }
+  };
+
+  const clearSpaceTheme = (spaceId: string) => {
+    const newOverrides = { ...spaceThemeOverrides };
+    delete newOverrides[spaceId];
+    setSpaceThemeOverrides(newOverrides);
+    localStorage.setItem('nychatt_space_themes', JSON.stringify(newOverrides));
+  };
+
+  const getSpaceTheme = (spaceId: string): string | null => {
+    return spaceThemeOverrides[spaceId] || null;
+  };
+
+  const setCurrentRoomWrapper = (roomId: string | null, spaceId?: string | null) => {
+    setCurrentRoomId(roomId);
+    if (spaceId !== undefined) {
+      setCurrentSpaceId(spaceId);
+    }
+  };
+
+  // Helper to get the theme object for a specific room (respecting hierarchy)
+  const getRoomThemeObject = (roomId: string, spaceId: string | null): Theme => {
+    const roomOverride = roomThemeOverrides[roomId];
+    const spaceOverride = spaceId ? spaceThemeOverrides[spaceId] : null;
+    const effectiveThemeName = roomOverride || spaceOverride || defaultThemeName;
+    return themes[effectiveThemeName] || themes.terminal;
+  };
+
   const availableThemes = Object.values(themes);
 
-  // Apply theme CSS variables to document root
+  // Apply GLOBAL theme CSS variables to document root (for UI chrome)
   useEffect(() => {
     const root = document.documentElement;
     
@@ -220,7 +309,23 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [theme]);
 
   return (
-    <ThemeContext.Provider value={{ theme, themeName, setTheme, availableThemes }}>
+    <ThemeContext.Provider value={{ 
+      theme, 
+      themeName, 
+      defaultThemeName,
+      currentRoomId,
+      currentSpaceId,
+      getRoomThemeObject,
+      setTheme, 
+      setRoomTheme,
+      clearRoomTheme,
+      getRoomTheme,
+      setSpaceTheme,
+      clearSpaceTheme,
+      getSpaceTheme,
+      setCurrentRoom: setCurrentRoomWrapper,
+      availableThemes 
+    }}>
       {children}
     </ThemeContext.Provider>
   );

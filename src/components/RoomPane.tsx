@@ -14,17 +14,22 @@ interface RoomPaneProps {
 }
 
 const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
-  const { setCurrentRoom } = useMatrix();
+  const { setCurrentRoom, getParentSpace } = useMatrix();
   const { removeRoom, setActiveRoom, openRooms } = useMultiRoom();
-  const { theme } = useTheme();
+  const { theme: globalTheme, setCurrentRoom: setThemeCurrentRoom, getRoomThemeObject } = useTheme();
   const [showInfo, setShowInfo] = useState(false);
   
-  // Set the room as current in MatrixContext when this pane is active
+  // Get the specific theme for this room (respecting hierarchy)
+  const spaceId = getParentSpace(room.roomId);
+  const roomTheme = getRoomThemeObject(room.roomId, spaceId);
+  
+  // Set the room as current in MatrixContext and ThemeContext when this pane is active
   React.useEffect(() => {
     if (isActive) {
       setCurrentRoom(room);
+      setThemeCurrentRoom(room.roomId, spaceId);
     }
-  }, [isActive, room, setCurrentRoom]);
+  }, [isActive, room, setCurrentRoom, setThemeCurrentRoom, spaceId]);
 
   const handleClose = () => {
     removeRoom(room.roomId);
@@ -37,6 +42,47 @@ const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
     }
   };
 
+  // Create room-specific CSS variables
+  const roomThemeStyle: React.CSSProperties = {
+    // Colors
+    '--color-bg': roomTheme.colors.bg,
+    '--color-bgSecondary': roomTheme.colors.bgSecondary,
+    '--color-bgTertiary': roomTheme.colors.bgTertiary,
+    '--color-text': roomTheme.colors.text,
+    '--color-textSecondary': roomTheme.colors.textSecondary,
+    '--color-textMuted': roomTheme.colors.textMuted,
+    '--color-primary': roomTheme.colors.primary,
+    '--color-primaryHover': roomTheme.colors.primaryHover,
+    '--color-border': roomTheme.colors.border,
+    '--color-messageBubbleOwn': roomTheme.colors.messageBubbleOwn,
+    '--color-messageBubbleOther': roomTheme.colors.messageBubbleOther,
+    '--color-hover': roomTheme.colors.hover,
+    '--color-accent': roomTheme.colors.accent,
+    '--color-success': roomTheme.colors.success,
+    '--color-error': roomTheme.colors.error,
+    '--color-warning': roomTheme.colors.warning,
+    // Fonts
+    '--font-body': roomTheme.fonts.body,
+    '--font-mono': roomTheme.fonts.mono,
+    // Spacing
+    '--spacing-roomItemPadding': roomTheme.spacing.roomItemPadding,
+    '--spacing-roomItemGap': roomTheme.spacing.roomItemGap,
+    '--spacing-sidebarPadding': roomTheme.spacing.sidebarPadding,
+    '--spacing-messagePadding': roomTheme.spacing.messagePadding,
+    '--spacing-messageGap': roomTheme.spacing.messageGap,
+    '--spacing-inputPadding': roomTheme.spacing.inputPadding,
+    // Sizing
+    '--sizing-textBase': roomTheme.sizing.textBase,
+    '--sizing-textSm': roomTheme.sizing.textSm,
+    '--sizing-textXs': roomTheme.sizing.textXs,
+    '--sizing-textLg': roomTheme.sizing.textLg,
+    '--sizing-textXl': roomTheme.sizing.textXl,
+    '--sizing-roomItemHeight': roomTheme.sizing.roomItemHeight,
+    '--sizing-avatarSize': roomTheme.sizing.avatarSize,
+    '--sizing-avatarSizeSmall': roomTheme.sizing.avatarSizeSmall,
+    '--sizing-borderRadius': roomTheme.sizing.borderRadius,
+  } as React.CSSProperties;
+
   return (
     <div 
       className="flex-1 flex min-w-0 relative"
@@ -48,26 +94,29 @@ const RoomPane: React.FC<RoomPaneProps> = ({ room, isActive }) => {
       }}
       onClick={handleClick}
     >
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main chat area - Apply room-specific theme */}
+      <div 
+        className="flex-1 flex flex-col min-w-0"
+        style={roomThemeStyle}
+      >
         {/* Room header */}
         <div
           className="flex items-center justify-between flex-shrink-0"
           style={{
             backgroundColor: 'var(--color-bgSecondary)',
             borderBottom: '1px solid var(--color-border)',
-            padding: theme.style.compactMode ? 'var(--spacing-sidebarPadding)' : '1rem 1.5rem',
+            padding: roomTheme.style.compactMode ? 'var(--spacing-sidebarPadding)' : '1rem 1.5rem',
           }}
         >
           <h3 
             className="font-bold truncate"
             style={{
               color: 'var(--color-text)',
-              fontSize: theme.style.compactMode ? 'var(--sizing-textBase)' : 'var(--sizing-textLg)',
-              fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
+              fontSize: roomTheme.style.compactMode ? 'var(--sizing-textBase)' : 'var(--sizing-textLg)',
+              fontFamily: roomTheme.style.compactMode ? 'var(--font-mono)' : 'inherit',
             }}
           >
-            {theme.style.compactMode ? `> ${room.name}` : room.name}
+            {roomTheme.style.compactMode ? `> ${room.name}` : room.name}
           </h3>
           
           <div className="flex items-center gap-2">

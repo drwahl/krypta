@@ -835,6 +835,24 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [updateRoomsAndSpaces]);
 
+  // Helper function to find which space a room belongs to
+  const getParentSpace = useCallback((roomId: string): string | null => {
+    if (!client) return null;
+    
+    for (const space of spaces) {
+      const childEvents = space.currentState.getStateEvents('m.space.child');
+      if (childEvents) {
+        for (const event of childEvents) {
+          if (event.getStateKey() === roomId) {
+            return space.roomId;
+          }
+        }
+      }
+    }
+    
+    return null;
+  }, [client, spaces]);
+
   const value: MatrixContextType = {
     client,
     isLoggedIn,
@@ -848,6 +866,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     sendReaction,
     deleteMessage,
     loadMoreHistory,
+    getParentSpace,
     needsVerification,
     verificationRequest,
     acceptVerification,

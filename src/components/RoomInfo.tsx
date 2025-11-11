@@ -11,8 +11,8 @@ interface RoomInfoProps {
 }
 
 const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
-  const { client } = useMatrix();
-  const { theme } = useTheme();
+  const { client, getParentSpace } = useMatrix();
+  const { theme, availableThemes, getRoomTheme, setRoomTheme, clearRoomTheme, getSpaceTheme, setSpaceTheme, clearSpaceTheme, defaultThemeName, currentSpaceId } = useTheme();
   const [activeTab, setActiveTab] = useState<'members' | 'pinned' | 'settings'>('members');
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [pinnedEvents, setPinnedEvents] = useState<MatrixEvent[]>([]);
@@ -553,6 +553,129 @@ const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
                 <p>• {canPin ? 'Can pin messages' : 'Cannot pin messages'}</p>
                 <p>• {canInvite ? 'Can invite users' : 'Cannot invite users'}</p>
               </div>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Room Theme</h4>
+              <p className="mb-3 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                Room theme → Space theme → Global default (affects only this chat window, not the UI chrome)
+              </p>
+              
+              {/* Show current hierarchy */}
+              {(() => {
+                const roomOverride = getRoomTheme(room.roomId);
+                const spaceId = getParentSpace(room.roomId);
+                const spaceOverride = spaceId ? getSpaceTheme(spaceId) : null;
+                const effectiveTheme = roomOverride || spaceOverride || defaultThemeName;
+                const effectiveThemeDisplay = availableThemes.find(t => t.name === effectiveTheme)?.displayName || 'Unknown';
+                
+                return (
+                  <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--color-bgTertiary)', fontSize: 'var(--sizing-textSm)' }}>
+                    <div className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>
+                      Current: {effectiveThemeDisplay}
+                    </div>
+                    <div className="space-y-1 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                      <div>• Global: {availableThemes.find(t => t.name === defaultThemeName)?.displayName}</div>
+                      {spaceId && (
+                        <div>• Space: {spaceOverride ? availableThemes.find(t => t.name === spaceOverride)?.displayName : '(using global)'}</div>
+                      )}
+                      <div>• Room: {roomOverride ? availableThemes.find(t => t.name === roomOverride)?.displayName : '(using ' + (spaceOverride ? 'space' : 'global') + ')'}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+              
+              {/* Room Theme Section */}
+              <div className="mb-4">
+                <h5 className="font-semibold mb-2 text-sm" style={{ color: 'var(--color-text)' }}>Room Theme Override</h5>
+                <div className="space-y-2">
+                  {/* Default/inherit option */}
+                  <button
+                    onClick={() => clearRoomTheme(room.roomId)}
+                    className="w-full px-3 py-2 rounded text-left transition"
+                    style={{
+                      backgroundColor: !getRoomTheme(room.roomId) ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                      color: !getRoomTheme(room.roomId) ? '#fff' : 'var(--color-textSecondary)',
+                      fontSize: 'var(--sizing-textSm)',
+                    }}
+                  >
+                    <div className="font-medium">Use Parent Theme</div>
+                    <div className="text-xs opacity-75">
+                      {(() => {
+                        const spaceId = getParentSpace(room.roomId);
+                        const spaceOverride = spaceId ? getSpaceTheme(spaceId) : null;
+                        return spaceOverride 
+                          ? availableThemes.find(t => t.name === spaceOverride)?.displayName 
+                          : availableThemes.find(t => t.name === defaultThemeName)?.displayName;
+                      })()}
+                    </div>
+                  </button>
+
+                  {/* Theme options */}
+                  {availableThemes.map((t) => (
+                    <button
+                      key={t.name}
+                      onClick={() => setRoomTheme(room.roomId, t.name)}
+                      className="w-full px-3 py-2 rounded text-left transition"
+                      style={{
+                        backgroundColor: getRoomTheme(room.roomId) === t.name ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                        color: getRoomTheme(room.roomId) === t.name ? '#fff' : 'var(--color-textSecondary)',
+                        fontSize: 'var(--sizing-textSm)',
+                      }}
+                    >
+                      {t.displayName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Space Theme Section (if room belongs to a space) */}
+              {(() => {
+                const spaceId = getParentSpace(room.roomId);
+                if (!spaceId) return null;
+                
+                return (
+                  <div>
+                    <h5 className="font-semibold mb-2 text-sm" style={{ color: 'var(--color-text)' }}>Space Theme Override</h5>
+                    <p className="mb-2 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                      Set the default theme for all rooms in this space
+                    </p>
+                    <div className="space-y-2">
+                      {/* Default option */}
+                      <button
+                        onClick={() => clearSpaceTheme(spaceId)}
+                        className="w-full px-3 py-2 rounded text-left transition"
+                        style={{
+                          backgroundColor: !getSpaceTheme(spaceId) ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                          color: !getSpaceTheme(spaceId) ? '#fff' : 'var(--color-textSecondary)',
+                          fontSize: 'var(--sizing-textSm)',
+                        }}
+                      >
+                        <div className="font-medium">Use Global Default</div>
+                        <div className="text-xs opacity-75">
+                          {availableThemes.find(t => t.name === defaultThemeName)?.displayName}
+                        </div>
+                      </button>
+
+                      {/* Theme options */}
+                      {availableThemes.map((t) => (
+                        <button
+                          key={t.name}
+                          onClick={() => setSpaceTheme(spaceId, t.name)}
+                          className="w-full px-3 py-2 rounded text-left transition"
+                          style={{
+                            backgroundColor: getSpaceTheme(spaceId) === t.name ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                            color: getSpaceTheme(spaceId) === t.name ? '#fff' : 'var(--color-textSecondary)',
+                            fontSize: 'var(--sizing-textSm)',
+                          }}
+                        >
+                          {t.displayName}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
