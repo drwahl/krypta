@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback, type RefCallback } from 'react';
 import { Room, MatrixClient } from 'matrix-js-sdk';
-import { ClientWidgetApi, Widget } from 'matrix-widget-api';
+import {
+  ClientWidgetApi,
+  Widget,
+  type IWidgetApiRequest,
+  type IWidgetApiRequestData,
+  type IWidgetApiResponseData,
+} from 'matrix-widget-api';
 
 import { ElementCallWidgetDriver, ELEMENT_CALL_WIDGET_TYPE } from '../utils/ElementCallWidgetDriver';
 
@@ -166,9 +172,19 @@ export const useElementCall = (room: Room | null, client: MatrixClient | null) =
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const widgetApiRef = useRef<ClientWidgetApi | null>(null);
   const widgetDriverRef = useRef<ElementCallWidgetDriver | null>(null);
+  const actionCleanupRef = useRef<(() => void)[]>([]);
+  const deviceMuteStateRef = useRef({ audio_enabled: true, video_enabled: true });
   
   const teardownWidget = useCallback(() => {
     if (widgetApiRef.current) {
+      actionCleanupRef.current.forEach((fn) => {
+        try {
+          fn();
+        } catch (error) {
+          console.warn('[ElementCall] Failed to clean up widget action listener', error);
+        }
+      });
+      actionCleanupRef.current = [];
       widgetApiRef.current.removeAllListeners();
       widgetApiRef.current.stop();
       widgetApiRef.current = null;
@@ -188,6 +204,8 @@ export const useElementCall = (room: Room | null, client: MatrixClient | null) =
 
     try {
       const widgetId = `nychatt_call_${room.roomId}`;
+      deviceMuteStateRef.current = { audio_enabled: true, video_enabled: true };
+
       const widget = new Widget({
         id: widgetId,
         creatorUserId: client.getUserId() || '',
@@ -206,6 +224,7 @@ export const useElementCall = (room: Room | null, client: MatrixClient | null) =
 
       widgetDriverRef.current = driver;
       widgetApiRef.current = api;
+      actionCleanupRef.current = [];
 
       api.on('ready', () => {
         console.log('[ElementCall] Widget ready');
@@ -214,6 +233,44 @@ export const useElementCall = (room: Room | null, client: MatrixClient | null) =
       api.on('error:preparing', (error) => {
         console.error('[ElementCall] Widget preparation error', error);
       });
+
+      const registerAction = (
+        action: string,
+        handler: (data: IWidgetApiRequestData) => Promise<IWidgetApiResponseData | void> | IWidgetApiResponseData | void,
+      ) => {
+        const listener = async (ev: CustomEvent<IWidgetApiRequest>) => {
+          ev.preventDefault();
+          try {
+            const result = await handler(ev.detail.data);
+            api.transport.reply(ev.detail, result ?? {});
+          } catch (error) {
+            console.error(`[ElementCall] Failed to handle action ${action}`, error);
+            api.transport.reply(ev.detail, {
+              error: { message: error instanceof Error ? error.message : 'Unhandled widget action' },
+            });
+          }
+        };
+        api.on(`action:${action}`, listener);
+        actionCleanupRef.current.push(() => api.off(`action:${action}`, listener));
+      };
+
+      registerAction('io.element.device_mute', async (data) => {
+        const state = deviceMuteStateRef.current;
+        const payload = data as { audio_enabled?: boolean; video_enabled?: boolean };
+        if (typeof payload.audio_enabled === 'boolean') {
+          state.audio_enabled = payload.audio_enabled;
+        }
+        if (typeof payload.video_enabled === 'boolean') {
+          state.video_enabled = payload.video_enabled;
+        }
+        return { ...state };
+      });
+
+      const noopHandler = async () => ({});
+      registerAction('io.element.join', noopHandler);
+      registerAction('io.element.spotlight_layout', noopHandler);
+      registerAction('set_always_on_screen', noopHandler);
+      registerAction('io.element.leave', noopHandler);
     } catch (error) {
       console.error('[ElementCall] Failed to initialise Element Call widget', error);
     }

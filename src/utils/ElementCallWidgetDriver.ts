@@ -6,6 +6,7 @@ import {
   type IOpenIDUpdate,
   type IRoomEvent,
   type ITurnServer,
+  type ISendDelayedEventDetails,
   OpenIDRequestState,
 } from 'matrix-widget-api';
 import type { MatrixClient, MatrixEvent, Room } from 'matrix-js-sdk';
@@ -44,12 +45,12 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     return new Set(requested);
   }
 
-  public override async sendEvent(
+  private async sendMatrixEvent(
     eventType: string,
     content: unknown,
-    stateKey: string | null = null,
-    roomId: string | null = null,
-  ) {
+    stateKey: string | null,
+    roomId: string | null,
+  ): Promise<{ roomId: string; eventId: string }> {
     const targetRoomId = roomId ?? this.room.roomId;
     if (!targetRoomId) {
       throw new Error('No room ID available for sendEvent');
@@ -70,12 +71,45 @@ export class ElementCallWidgetDriver extends WidgetDriver {
       response = await this.client.sendEvent(targetRoomId, eventType, eventContent, undefined);
     }
 
-    const eventId =
-      typeof response === 'string'
-        ? response
-        : (response as { event_id?: string })?.event_id ?? '';
+    const eventId = typeof response === 'string' ? response : (response as { event_id?: string })?.event_id ?? '';
 
     return { roomId: targetRoomId, eventId };
+  }
+
+  public override async sendEvent(
+    eventType: string,
+    content: unknown,
+    stateKey: string | null = null,
+    roomId: string | null = null,
+  ) {
+    return this.sendMatrixEvent(eventType, content, stateKey, roomId);
+  }
+
+  public override async sendDelayedEvent(
+    delay: number | null,
+    parentDelayId: string | null,
+    eventType: string,
+    content: unknown,
+    stateKey: string | null = null,
+    roomId: string | null = null,
+  ): Promise<ISendDelayedEventDetails> {
+    // NyChatt does not currently queue delayed events, so send immediately.
+    const { roomId: targetRoomId, eventId } = await this.sendMatrixEvent(eventType, content, stateKey, roomId);
+    const delayId = `immediate-${eventId || Date.now().toString(36)}`;
+    return { roomId: targetRoomId, delayId };
+  }
+
+  public override cancelScheduledDelayedEvent(_delayId: string): Promise<void> {
+    // No-op (we send events immediately).
+    return Promise.resolve();
+  }
+
+  public override restartScheduledDelayedEvent(_delayId: string): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public override sendScheduledDelayedEvent(_delayId: string): Promise<void> {
+    return Promise.resolve();
   }
 
   public override async sendToDevice(
