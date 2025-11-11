@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MatrixProvider, useMatrix } from './MatrixContext';
 import { ThreadsProvider } from './contexts/ThreadsContext';
+import { ThemeProvider } from './ThemeContext';
 import Login from './components/Login';
 import RoomList from './components/RoomList';
 import MessageTimeline from './components/MessageTimeline';
@@ -69,11 +70,13 @@ const ChatApp: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
-      <MatrixProvider>
-        <ThreadsProvider>
-          <ChatApp />
-        </ThreadsProvider>
-      </MatrixProvider>
+      <ThemeProvider>
+        <MatrixProvider>
+          <ThreadsProvider>
+            <ChatApp />
+          </ThreadsProvider>
+        </MatrixProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 };

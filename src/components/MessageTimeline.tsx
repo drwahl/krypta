@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useMatrix } from '../MatrixContext';
+import { useTheme } from '../ThemeContext';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
-import { Smile, Reply, Lock, LockOpen, ShieldAlert, Upload, Video, Trash2 } from 'lucide-react';
+import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X } from 'lucide-react';
 import { MatrixEvent } from 'matrix-js-sdk';
 
 const MessageTimeline: React.FC = () => {
   const { currentRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
+  const { theme } = useTheme();
   const [messages, setMessages] = useState<MatrixEvent[]>([]);
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -14,9 +16,12 @@ const MessageTimeline: React.FC = () => {
   const [reactionUpdate, setReactionUpdate] = useState(0); // Force re-render for reactions
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null); // Track which message's picker is open
   const [selectedCategory, setSelectedCategory] = useState('Smileys'); // Track selected emoji category
-  const [customEmojis, setCustomEmojis] = useState<Array<{ url: string; name: string }>>([]); // Custom uploaded emojis
+  const [customEmojis, setCustomEmojis] = useState<Array<{ mxcUrl: string; name: string; blobUrl?: string }>>([]); // Custom uploaded emojis
   const [isUploading, setIsUploading] = useState(false);
+  const [showCallFrame, setShowCallFrame] = useState(false); // Track if Element Call is embedded
+  const [callUrl, setCallUrl] = useState<string>(''); // Store the call URL
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const callIframeRef = useRef<HTMLIFrameElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesStartRef = useRef<HTMLDivElement>(null);
 
@@ -222,72 +227,408 @@ const MessageTimeline: React.FC = () => {
   };
 
   // Join Element Call
-  const joinElementCall = () => {
+  const joinElementCall = async () => {
     if (!currentRoom || !client) return;
     
     const roomId = currentRoom.roomId;
     const homeserver = client.getHomeserverUrl();
     const accessToken = client.getAccessToken();
     const userId = client.getUserId();
+    const displayName = client.getUser(userId || '')?.displayName || userId;
+    const deviceId = client.getDeviceId();
     
-    // First check if there's a specific Element Call widget URL in the room
+    console.log('🎥 Attempting to join Element Call...');
+    console.log('🎥 Room:', currentRoom.name, '(' + roomId + ')');
+    
+    let callUrl = '';
+    let existingCallId = '';
+    
+    // Check for existing active calls in the room
+    // Element Call uses org.matrix.msc3401.call and org.matrix.msc3401.call.member events
+    try {
+      const callStateEvents = currentRoom.currentState.getStateEvents('org.matrix.msc3401.call');
+      console.log('🔍 Checking for active calls in room...');
+      
+      if (callStateEvents && callStateEvents.length > 0) {
+        for (const event of callStateEvents) {
+          const content = event.getContent();
+          const stateKey = event.getStateKey();
+          
+          // Check if this call is active (not terminated)
+          if (content && !content['m.terminated'] && stateKey) {
+            existingCallId = stateKey; // The state key IS the call ID
+            console.log('✅ Found existing active call:', existingCallId);
+            break;
+          }
+        }
+      }
+      
+      if (!existingCallId) {
+        console.log('⚠️ No active call found, Element Call will create a new one');
+      }
+    } catch (error) {
+      console.warn('Failed to check for existing calls:', error);
+    }
+    
+    // First check if there's a specific Element Call widget in the room
     const widgetEvents = currentRoom.currentState.getStateEvents('im.vector.modular.widgets');
-    let widgetUrl = '';
     
     if (widgetEvents && widgetEvents.length > 0) {
       for (const event of widgetEvents) {
         const content = event.getContent();
+        const type = content?.type || '';
         const url = content?.url || '';
-        if (url.includes('element.io/call') || url.includes('call.element.io')) {
-          widgetUrl = url;
+        const data = content?.data || {};
+        
+        console.log('🔍 Found widget:', { type, url: url.substring(0, 50) + '...' });
+        
+        // Look for Element Call widgets
+        if (type === 'io.element.call' || url.includes('element.io/call') || url.includes('call.element.io')) {
+          // Use the widget URL and substitute template variables
+          callUrl = url
+            .replace('$matrix_room_id', encodeURIComponent(roomId))
+            .replace('$matrix_user_id', encodeURIComponent(userId || ''))
+            .replace('$matrix_display_name', encodeURIComponent(displayName || ''))
+            .replace('$matrix_device_id', encodeURIComponent(deviceId || ''))
+            .replace('$org.matrix.msc3401.call_id', existingCallId || data?.call_id || '');
+          
+          console.log('✅ Found Element Call widget in room state');
           break;
         }
       }
     }
     
-    // Use widget URL if available, otherwise construct Element Call URL
-    let callUrl = widgetUrl || `https://call.element.io/room/#/${roomId}`;
+    // If no widget found, try wellknown configuration
+    if (!callUrl && homeserver) {
+      try {
+        const homeserverUrl = new URL(homeserver);
+        const wellknownUrl = `${homeserverUrl.protocol}//${homeserverUrl.host}/.well-known/matrix/client`;
+        
+        console.log('🔍 Checking .well-known/matrix/client at:', wellknownUrl);
+        
+        // Try to fetch wellknown with a timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        try {
+          const response = await fetch(wellknownUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          console.log('📥 .well-known response status:', response.status);
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('📦 .well-known data:', data);
+            
+            // Check for Element Call configuration first
+            const elementCallUrl = data?.['io.element.call']?.url;
+            
+            if (elementCallUrl) {
+              callUrl = elementCallUrl;
+              console.log('✅ Found Element Call URL in .well-known:', elementCallUrl);
+            } else {
+              // Check for LiveKit configuration (newer standard)
+              const rtcFoci = data?.['org.matrix.msc4143.rtc_foci'];
+              console.log('🔍 rtc_foci in .well-known:', rtcFoci);
+              
+              if (rtcFoci && Array.isArray(rtcFoci) && rtcFoci.length > 0) {
+                const livekitFocus = rtcFoci.find((focus: any) => focus.type === 'livekit');
+                console.log('🔍 LiveKit focus found:', livekitFocus);
+                
+                if (livekitFocus?.livekit_service_url) {
+                  // When LiveKit is configured, we use Element Call with LiveKit backend
+                  callUrl = 'https://call.element.io'; // Use public Element Call UI with your LiveKit backend
+                  console.log('✅ Found LiveKit configuration:', livekitFocus.livekit_service_url);
+                  console.log('✅ Will use Element Call UI with your LiveKit backend');
+                }
+              }
+              
+              if (!callUrl) {
+                console.log('⚠️ No Element Call or LiveKit configuration in .well-known');
+              }
+            }
+          } else {
+            console.log('⚠️ .well-known returned status:', response.status);
+          }
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+          if (fetchError.name === 'AbortError') {
+            console.log('⏱️ .well-known request timed out after 5 seconds');
+          } else {
+            console.log('⚠️ .well-known request failed:', fetchError.message);
+          }
+        }
+      } catch (error) {
+        console.warn('❌ Failed to check .well-known:', error);
+      }
+    }
     
-    // Add authentication parameters to allow seamless join
-    const url = new URL(callUrl);
+    // Final fallback to public Element Call
+    if (!callUrl) {
+      callUrl = 'https://call.element.io';
+      console.log('🎥 Using public Element Call (call.element.io) as fallback');
+    }
+    
+    // Construct the full call URL with proper widget parameters
+    // Element Call in widget mode: https://call.domain/?widget_id=...&parent_url=...#/room/!roomId?callId=...
+    
+    // If callUrl already has parameters (from widget), parse them
+    const parsedUrl = new URL(callUrl);
+    
+    // Widget mode parameters - these tell Element Call to use Widget API for auth
+    parsedUrl.searchParams.set('widgetId', 'element-call-' + roomId);
+    parsedUrl.searchParams.set('parentUrl', window.location.origin);
+    parsedUrl.searchParams.set('roomId', roomId); // CRITICAL: roomId as query param for widget mode
+    
+    // CRITICAL: baseUrl is the Matrix homeserver URL - required for widget mode
     if (homeserver) {
-      url.searchParams.set('homeserver', homeserver);
-    }
-    if (accessToken) {
-      url.searchParams.set('accessToken', accessToken);
-    }
-    if (userId) {
-      url.searchParams.set('userId', userId);
+      parsedUrl.searchParams.set('baseUrl', homeserver);
+      console.log('📡 Passing baseUrl (homeserver) to Element Call:', homeserver);
     }
     
-    const finalUrl = url.toString();
-    console.log('🎥 Opening Element Call for room:', currentRoom.name);
+    parsedUrl.searchParams.set('embed', 'true'); // Enable embedded mode
+    parsedUrl.searchParams.set('hideHeader', 'true'); // Hide the Element Call header
+    parsedUrl.searchParams.set('preload', 'true'); // Preload the call
+    parsedUrl.searchParams.set('skipLobby', 'true'); // Skip lobby
+    parsedUrl.searchParams.set('displayName', displayName || '');
+    parsedUrl.searchParams.set('userId', userId || '');
+    parsedUrl.searchParams.set('deviceId', deviceId || '');
+    
+    // If there's an existing call, pass the call ID as a parameter too
+    if (existingCallId) {
+      parsedUrl.searchParams.set('callId', existingCallId);
+      console.log('📞 Passing call ID as parameter:', existingCallId);
+    }
+    
+    // Build the hash/fragment for the room
+    // If there's an existing call, include the call ID so Element Call joins it
+    let callFragment = `/room/${encodeURIComponent(roomId)}`;
+    if (existingCallId) {
+      callFragment += `?callId=${encodeURIComponent(existingCallId)}`;
+      console.log('✅ Joining existing call with ID:', existingCallId);
+    } else {
+      console.log('⚠️ No call ID - Element Call will create a new call');
+    }
+    
+    // Construct final URL: base + query params + hash
+    const finalUrl = `${parsedUrl.origin}${parsedUrl.pathname}?${parsedUrl.searchParams.toString()}#${callFragment}`;
+    
+    console.log('🎥 Embedding Element Call in widget mode');
+    console.log('🎥 Base URL:', callUrl);
     console.log('🎥 Room ID:', roomId);
-    console.log('🎥 Call URL:', finalUrl.replace(accessToken || '', '[REDACTED]'));
+    console.log('🎥 Widget ID:', 'element-call-' + roomId);
+    console.log('🎥 Final URL:', finalUrl);
     
-    // Open in new window/tab with appropriate features for a call window
-    const callWindow = window.open(
-      finalUrl,
-      `element-call-${roomId}`,
-      'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no'
-    );
-    
-    if (!callWindow) {
-      alert('Pop-up blocked! Please allow pop-ups for this site to join video calls.');
-    }
+    // Set state to show the embedded call frame
+    setCallUrl(finalUrl);
+    setShowCallFrame(true);
   };
+
+  // Fetch authenticated media and convert to blob URL
+  const fetchAuthenticatedMedia = useCallback(async (mxcUrl: string): Promise<string | null> => {
+    if (!client) return null;
+    
+    try {
+      const httpUrl = client.mxcUrlToHttp(mxcUrl);
+      if (!httpUrl) return null;
+      
+      const accessToken = client.getAccessToken();
+      
+      // Fetch with authentication
+      const response = await fetch(httpUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to fetch media:', response.status, response.statusText);
+        return null;
+      }
+      
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return blobUrl;
+    } catch (error) {
+      console.error('Error fetching authenticated media:', error);
+      return null;
+    }
+  }, [client]);
 
   // Load custom emojis from localStorage on mount
   useEffect(() => {
-    const stored = localStorage.getItem('custom_emojis');
-    if (stored) {
+    const loadCustomEmojis = async () => {
+      const stored = localStorage.getItem('custom_emojis');
+      if (!stored || !client) return;
+      
       try {
-        setCustomEmojis(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        
+        // Migrate old format (url) to new format (mxcUrl)
+        const migrated = parsed.map((emoji: any) => {
+          // If it has the old 'url' property instead of 'mxcUrl', clear it
+          if (emoji.url && !emoji.mxcUrl) {
+            console.warn('Clearing old format custom emoji:', emoji.name);
+            return null;
+          }
+          return emoji;
+        }).filter(Boolean);
+        
+        if (migrated.length !== parsed.length) {
+          console.log('Migrated custom emojis from old format');
+          localStorage.setItem('custom_emojis', JSON.stringify(migrated));
+        }
+        
+        // Fetch blob URLs for all emojis
+        console.log('📦 Loading', migrated.length, 'custom emojis...');
+        const withBlobs = await Promise.all(
+          migrated.map(async (emoji: any) => {
+            const blobUrl = await fetchAuthenticatedMedia(emoji.mxcUrl);
+            return {
+              ...emoji,
+              blobUrl: blobUrl || undefined
+            };
+          })
+        );
+        
+        console.log('✅ Custom emojis loaded');
+        setCustomEmojis(withBlobs);
       } catch (e) {
         console.error('Failed to load custom emojis:', e);
       }
+    };
+    
+    loadCustomEmojis();
+  }, [client, fetchAuthenticatedMedia]);
+
+  // Media renderer component (as a sub-component to handle state)
+  const MediaRenderer: React.FC<{ content: any }> = ({ content }) => {
+    const msgtype = content.msgtype;
+    const mxcUrl = content.url;
+    const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+    const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
+    
+    useEffect(() => {
+      if (!mxcUrl || !client) return;
+      
+      let mounted = true;
+      
+      const loadMedia = async () => {
+        // Load main media
+        const blobUrl = await fetchAuthenticatedMedia(mxcUrl);
+        if (mounted && blobUrl) {
+          setMediaBlobUrl(blobUrl);
+        }
+        
+        // Load thumbnail if available (for images)
+        if (msgtype === 'm.image' && content.info?.thumbnail_url) {
+          const thumbUrl = await fetchAuthenticatedMedia(content.info.thumbnail_url);
+          if (mounted && thumbUrl) {
+            setThumbnailBlobUrl(thumbUrl);
+          }
+        }
+      };
+      
+      loadMedia();
+      
+      return () => {
+        mounted = false;
+        // Clean up blob URLs when component unmounts
+        if (mediaBlobUrl) URL.revokeObjectURL(mediaBlobUrl);
+        if (thumbnailBlobUrl) URL.revokeObjectURL(thumbnailBlobUrl);
+      };
+    }, [mxcUrl, msgtype, content.info?.thumbnail_url]);
+    
+    if (!mxcUrl || !client) return null;
+    
+    const httpUrl = client.mxcUrlToHttp(mxcUrl);
+    if (!httpUrl) return null;
+    
+    const filename = content.body || 'file';
+    const filesize = content.info?.size;
+    
+    // Images
+    if (msgtype === 'm.image') {
+      const width = content.info?.w;
+      const displayUrl = thumbnailBlobUrl || mediaBlobUrl;
+      
+      if (!displayUrl) {
+        return (
+          <div className="mt-2 text-slate-400 text-sm">
+            Loading image...
+          </div>
+        );
+      }
+      
+      return (
+        <div className="mt-2">
+          <a href={mediaBlobUrl || httpUrl} target="_blank" rel="noopener noreferrer">
+            <img
+              src={displayUrl}
+              alt={filename}
+              className="max-w-sm max-h-96 rounded-lg cursor-pointer hover:opacity-90 transition"
+              style={{ maxWidth: width && width < 400 ? width : undefined }}
+              loading="lazy"
+            />
+          </a>
+          {filename && (
+            <div className="text-xs text-slate-400 mt-1">{filename}</div>
+          )}
+        </div>
+      );
     }
-  }, []);
+    
+    // Videos
+    if (msgtype === 'm.video') {
+      if (!mediaBlobUrl) {
+        return (
+          <div className="mt-2 text-slate-400 text-sm">
+            Loading video...
+          </div>
+        );
+      }
+      
+      return (
+        <div className="mt-2">
+          <video
+            src={mediaBlobUrl}
+            controls
+            className="max-w-sm max-h-96 rounded-lg"
+            preload="metadata"
+          >
+            Your browser doesn't support video playback.
+          </video>
+          {filename && (
+            <div className="text-xs text-slate-400 mt-1">{filename}</div>
+          )}
+        </div>
+      );
+    }
+    
+    // Files - use direct link with download attribute
+    if (msgtype === 'm.file') {
+      const filesizeStr = filesize ? `(${(filesize / 1024).toFixed(1)} KB)` : '';
+      
+      // For files, use the authenticated blob URL if available, otherwise fallback to direct link
+      const downloadUrl = mediaBlobUrl || httpUrl;
+      
+      return (
+        <div className="mt-2">
+          <a
+            href={downloadUrl}
+            download={filename}
+            className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm"
+          >
+            <Upload className="w-4 h-4" />
+            <span>{filename}</span>
+            {filesizeStr && <span className="text-xs text-slate-400">{filesizeStr}</span>}
+          </a>
+        </div>
+      );
+    }
+    
+    return null;
+  };
 
   // Handle custom emoji upload
   const handleEmojiUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -309,6 +650,7 @@ const MessageTimeline: React.FC = () => {
     setIsUploading(true);
     try {
       console.log('📤 Uploading custom emoji...');
+      console.log('📤 File:', file.name, 'Size:', file.size, 'Type:', file.type);
       
       // Upload to Matrix media repository
       const response = await client.uploadContent(file, {
@@ -317,26 +659,32 @@ const MessageTimeline: React.FC = () => {
       });
 
       const mxcUrl = response.content_uri;
-      const httpUrl = client.mxcUrlToHttp(mxcUrl);
       
-      if (!httpUrl) {
-        throw new Error('Failed to convert MXC URL to HTTP');
-      }
+      console.log('✅ Uploaded to Matrix:', mxcUrl);
+      
+      // Fetch the image with authentication and create blob URL
+      const blobUrl = await fetchAuthenticatedMedia(mxcUrl);
+      console.log('✅ Blob URL created:', !!blobUrl);
 
-      // Add to custom emojis
+      // Add to custom emojis - store MXC URL (canonical format) and blob URL
       const newEmoji = {
-        url: httpUrl,
+        mxcUrl: mxcUrl,
         name: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension
+        blobUrl: blobUrl || undefined
       };
 
       const updated = [...customEmojis, newEmoji];
       setCustomEmojis(updated);
-      localStorage.setItem('custom_emojis', JSON.stringify(updated));
+      
+      // Only save MXC URL to localStorage (blob URLs don't persist)
+      const toSave = updated.map(e => ({ mxcUrl: e.mxcUrl, name: e.name }));
+      localStorage.setItem('custom_emojis', JSON.stringify(toSave));
       
       // Switch to Custom category
       setSelectedCategory('Custom');
       
       console.log('✅ Custom emoji uploaded successfully');
+      console.log('✅ Saved emoji:', newEmoji);
     } catch (error) {
       console.error('❌ Failed to upload custom emoji:', error);
       alert('Failed to upload emoji. Please try again.');
@@ -348,6 +696,126 @@ const MessageTimeline: React.FC = () => {
       }
     }
   };
+
+  // Close call frame when room changes
+  useEffect(() => {
+    setShowCallFrame(false);
+    setCallUrl('');
+  }, [currentRoom]);
+
+  // Handle Widget API communication with Element Call iframe
+  useEffect(() => {
+    if (!showCallFrame || !callIframeRef.current || !client) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      // Security check: only accept messages from Element Call origin
+      const callOrigin = new URL(callUrl).origin;
+      if (event.origin !== callOrigin) {
+        console.log('❌ Ignoring message from wrong origin:', event.origin, 'expected:', callOrigin);
+        return;
+      }
+
+      const data = event.data;
+      
+      console.log('📨 Widget API message from Element Call:', data);
+      console.log('📨 Message origin:', event.origin);
+      console.log('📨 event.source === iframe.contentWindow:', event.source === callIframeRef.current?.contentWindow);
+
+      // Handle widget API requests - respond to the iframe directly
+      if (data.api === 'fromWidget' && callIframeRef.current?.contentWindow) {
+        const { requestId, action, widgetId } = data;
+        const targetWindow = callIframeRef.current.contentWindow;
+
+        // Respond to supported API versions
+        if (action === 'supported_api_versions') {
+          const response = {
+            api: 'toWidget',
+            widgetId: widgetId,
+            requestId: requestId,
+            data: {
+              supported_versions: ['0.0.2']  // Only claim to support 0.0.2
+            }
+          };
+          console.log('📤 Sending supported API versions response:', response);
+          console.log('📤 Target origin:', callOrigin);
+          console.log('📤 Using iframe.contentWindow directly');
+          
+          try {
+            targetWindow.postMessage(response, callOrigin);
+            console.log('✅ postMessage to iframe completed successfully');
+          } catch (e) {
+            console.error('❌ postMessage failed:', e);
+          }
+        }
+
+        // Respond to capabilities request
+        if (action === 'capabilities') {
+          const response = {
+            api: 'toWidget',
+            widgetId: widgetId,
+            requestId: requestId,
+            data: {
+              capabilities: [
+                'org.matrix.msc3401.call',
+                'org.matrix.msc3401.call.member',
+                'org.matrix.msc2762.timeline:*',
+                'org.matrix.msc2762.receive.event:m.room.message',
+                'org.matrix.msc2762.receive.state_event:m.room.member',
+                'org.matrix.msc2762.send.event:m.room.message',
+                'org.matrix.msc2762.send.state_event:m.room.member'
+              ]
+            }
+          };
+          targetWindow.postMessage(response, callOrigin);
+          console.log('✅ Sent capabilities response');
+        }
+
+        // Acknowledge content_loaded
+        if (action === 'content_loaded') {
+          const response = {
+            api: 'toWidget',
+            widgetId: widgetId,
+            requestId: requestId,
+            data: {}
+          };
+          targetWindow.postMessage(response, callOrigin);
+          console.log('✅ Acknowledged content_loaded');
+        }
+
+        // Respond to transport info request with auth credentials
+        if (action === 'transport') {
+          const response = {
+            api: 'toWidget',
+            widgetId: widgetId,
+            requestId: requestId,
+            data: {
+              homeserver: client.getHomeserverUrl(),
+              userId: client.getUserId(),
+              deviceId: client.getDeviceId(),
+              accessToken: client.getAccessToken()
+            }
+          };
+          targetWindow.postMessage(response, callOrigin);
+          console.log('✅ Sent transport/auth credentials');
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Log when iframe loads (but don't send initial message - Element Call will initiate)
+    const iframe = callIframeRef.current;
+    const handleLoad = () => {
+      console.log('📞 Element Call iframe loaded, waiting for Widget API requests...');
+    };
+
+    iframe?.addEventListener('load', handleLoad);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      iframe?.removeEventListener('load', handleLoad);
+    };
+  }, [showCallFrame, callUrl, client]);
 
   useEffect(() => {
     if (!currentRoom) {
@@ -406,19 +874,42 @@ const MessageTimeline: React.FC = () => {
     }
   }, [messages, isLoadingMore]);
 
-  const handleLoadMore = async () => {
-    if (!currentRoom || isLoadingMore || !canLoadMore) return;
+  // Infinite scroll: auto-load more messages when scrolling to top
+  useEffect(() => {
+    if (!messagesStartRef.current || !currentRoom) return;
     
-    setIsLoadingMore(true);
-    try {
-      const hasMore = await loadMoreHistory(currentRoom);
-      setCanLoadMore(hasMore);
-    } catch (error) {
-      console.error('Error loading more history:', error);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        const [entry] = entries;
+        
+        // If the top sentinel is visible and we're not already loading and there's more to load
+        if (entry.isIntersecting && !isLoadingMore && canLoadMore && messages.length > 0) {
+          console.log('📜 Loading more messages (infinite scroll)...');
+          setIsLoadingMore(true);
+          
+          try {
+            const hasMore = await loadMoreHistory(currentRoom);
+            setCanLoadMore(hasMore);
+          } catch (error) {
+            console.error('❌ Error loading more history:', error);
+          } finally {
+            setIsLoadingMore(false);
+          }
+        }
+      },
+      {
+        root: null, // viewport
+        rootMargin: '100px', // Trigger 100px before reaching the top
+        threshold: 0.1,
+      }
+    );
+    
+    observer.observe(messagesStartRef.current);
+    
+    return () => {
+      observer.disconnect();
+    };
+  }, [currentRoom, isLoadingMore, canLoadMore, messages.length, loadMoreHistory]);
 
   // Reset state when room changes - DON'T auto-load
   useEffect(() => {
@@ -595,29 +1086,42 @@ const MessageTimeline: React.FC = () => {
         </div>
       </div>
 
+      {/* Element Call Frame */}
+      {showCallFrame && callUrl && (
+        <div className="relative bg-slate-900 border-b border-slate-700" style={{ height: '600px' }}>
+          <button
+            onClick={() => setShowCallFrame(false)}
+            className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition font-medium shadow-lg flex items-center gap-2"
+            title="Leave call"
+          >
+            <X className="w-5 h-5" />
+            Leave Call
+          </button>
+          <iframe
+            ref={callIframeRef}
+            src={callUrl}
+            className="w-full h-full"
+            allow="camera; microphone; display-capture; autoplay; clipboard-write"
+            allowFullScreen
+            title="Element Call"
+          />
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {/* Load More Button */}
-        {canLoadMore && messages.length > 0 && (
-          <div className="flex justify-center pb-4">
-            <button
-              onClick={handleLoadMore}
-              disabled={isLoadingMore}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 text-slate-300 rounded-lg transition text-sm flex items-center gap-2"
-            >
-              {isLoadingMore ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-                  Loading...
-                </>
-              ) : (
-                'Load More Messages'
-              )}
-            </button>
+        {/* Infinite scroll sentinel - triggers loading when scrolled near top */}
+        <div ref={messagesStartRef} style={{ height: '1px', marginBottom: '1rem' }} />
+        
+        {/* Loading indicator at top */}
+        {isLoadingMore && messages.length > 0 && (
+          <div className="flex justify-center py-2">
+            <div className="flex items-center gap-2 text-slate-400 text-sm">
+              <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+              <span>Loading more messages...</span>
+            </div>
           </div>
         )}
-
-        <div ref={messagesStartRef} />
 
         {messages.length === 0 ? (
           <div className="text-center text-slate-500 mt-8">
@@ -635,6 +1139,299 @@ const MessageTimeline: React.FC = () => {
             const isDecryptionFailure = event.isDecryptionFailure();
             const isRedacted = event.isRedacted();
 
+            // Terminal-style rendering
+            if (theme.style.messageStyle === 'terminal') {
+              const senderShort = sender?.split(':')[0] || 'user'; // Extract @username part only
+              
+              return (
+                <div
+                  key={eventId}
+                  className="group"
+                  onMouseEnter={() => setHoveredMessage(eventId)}
+                  onMouseLeave={() => setHoveredMessage(null)}
+                  style={{
+                    padding: 'var(--spacing-messagePadding)',
+                    marginBottom: 'var(--spacing-messageGap)',
+                    fontSize: 'var(--sizing-textBase)',
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--color-text)',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.5rem',
+                    position: 'relative',
+                  }}
+                >
+                  {/* Terminal-style prompt */}
+                  <span style={{ color: 'var(--color-textMuted)', flexShrink: 0 }}>
+                    [{format(timestamp, 'HH:mm:ss')}]
+                  </span>
+                  <span style={{ color: 'var(--color-accent)', flexShrink: 0, fontWeight: 'bold' }}>
+                    {senderShort}
+                  </span>
+                  <span style={{ color: 'var(--color-textMuted)', flexShrink: 0 }}>$</span>
+                  
+                  {/* Message content */}
+                  <div className="flex-1 min-w-0" style={{ wordBreak: 'break-word' }}>
+                    {isRedacted ? (
+                      <span style={{ color: 'var(--color-textMuted)', fontStyle: 'italic' }}>
+                        [message deleted]
+                      </span>
+                    ) : isDecryptionFailure ? (
+                      <span style={{ color: 'var(--color-error)' }}>
+                        [unable to decrypt]
+                      </span>
+                    ) : (
+                      <>
+                        {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video')) && (
+                          <span>{renderMessageWithMentions(content.body || '')}</span>
+                        )}
+                        <MediaRenderer content={content} />
+                        {isEncrypted && (
+                          <span style={{ color: 'var(--color-success)', marginLeft: '0.5rem' }}>
+                            [encrypted]
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Reactions in terminal style */}
+                  {Object.keys(reactions).length > 0 && (
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginLeft: '0.5rem' }}>
+                      {Object.entries(reactions).map(([emoji, { count, userReacted }]) => {
+                        const isCustomEmoji = emoji.startsWith('mxc://');
+                        const cachedEmoji = isCustomEmoji 
+                          ? customEmojis.find(e => e.mxcUrl === emoji)
+                          : null;
+                        
+                        return (
+                          <button
+                            key={emoji}
+                            onClick={() => handleReaction(eventId, emoji)}
+                            style={{
+                              backgroundColor: userReacted ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+                              color: userReacted && theme.name === 'terminal' ? '#000' : 'var(--color-text)',
+                              padding: '0 0.25rem',
+                              fontSize: 'var(--sizing-textXs)',
+                              fontWeight: userReacted ? 'bold' : 'normal',
+                              border: userReacted ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
+                              cursor: 'pointer',
+                            }}
+                            title={`${count} reaction${count > 1 ? 's' : ''}`}
+                          >
+                            {isCustomEmoji && cachedEmoji?.blobUrl ? (
+                              <img 
+                                src={cachedEmoji.blobUrl} 
+                                alt="custom emoji" 
+                                style={{ width: '0.75rem', height: '0.75rem', display: 'inline-block', objectFit: 'contain', verticalAlign: 'middle' }}
+                                onError={(e) => {
+                                  console.error('Failed to load custom emoji reaction:', emoji);
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            ) : (
+                              <span>{isCustomEmoji ? '🖼️' : emoji}</span>
+                            )}
+                            {count > 1 && <span style={{ marginLeft: '0.125rem' }}>{count}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  
+                  {/* Compact actions on hover */}
+                  {hoveredMessage === eventId && (
+                    <div style={{ display: 'flex', gap: '0.25rem', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        onClick={() => {
+                          if (showEmojiPicker === eventId) {
+                            setShowEmojiPicker(null);
+                          } else {
+                            setShowEmojiPicker(eventId);
+                            setSelectedCategory('Smileys');
+                          }
+                        }}
+                        style={{
+                          backgroundColor: 'var(--color-bgTertiary)',
+                          color: 'var(--color-text)',
+                          padding: '0.125rem 0.25rem',
+                          fontSize: 'var(--sizing-textXs)',
+                          border: '1px solid var(--color-border)',
+                          cursor: 'pointer',
+                        }}
+                        title="Add reaction"
+                      >
+                        +
+                      </button>
+                      {isOwn && (
+                        <button
+                          onClick={() => handleDeleteMessage(eventId)}
+                          style={{
+                            backgroundColor: 'var(--color-bgTertiary)',
+                            color: 'var(--color-error)',
+                            padding: '0.125rem 0.25rem',
+                            fontSize: 'var(--sizing-textXs)',
+                            border: '1px solid var(--color-border)',
+                            cursor: 'pointer',
+                          }}
+                          title="Delete message"
+                        >
+                          x
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Emoji picker for terminal mode (same as bubble mode but positioned differently) */}
+                  {showEmojiPicker === eventId && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowEmojiPicker(null)}
+                      />
+                      
+                      <div 
+                        className="absolute left-0 bottom-full mb-2 z-50 w-80"
+                        style={{
+                          backgroundColor: 'var(--color-bgSecondary)',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: 'var(--sizing-borderRadius)',
+                        }}
+                      >
+                        {/* Same emoji picker content as bubble mode - keeping it simple */}
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleEmojiUpload}
+                          className="hidden"
+                        />
+                        
+                        <div className="flex border-b overflow-x-auto" style={{ borderBottomColor: 'var(--color-border)' }}>
+                          {Object.keys(emojiCategories).map((category) => (
+                            <button
+                              key={category}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedCategory(category);
+                              }}
+                              className="px-3 py-2 whitespace-nowrap transition"
+                              style={{
+                                fontSize: 'var(--sizing-textXs)',
+                                fontWeight: 'medium',
+                                color: selectedCategory === category ? 'var(--color-primary)' : 'var(--color-textMuted)',
+                                borderBottom: selectedCategory === category ? '2px solid var(--color-primary)' : 'none',
+                              }}
+                            >
+                              {category}
+                            </button>
+                          ))}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedCategory('Custom');
+                            }}
+                            className="px-3 py-2 whitespace-nowrap transition"
+                            style={{
+                              fontSize: 'var(--sizing-textXs)',
+                              fontWeight: 'medium',
+                              color: selectedCategory === 'Custom' ? 'var(--color-primary)' : 'var(--color-textMuted)',
+                              borderBottom: selectedCategory === 'Custom' ? '2px solid var(--color-primary)' : 'none',
+                            }}
+                          >
+                            Custom {customEmojis.length > 0 && `(${customEmojis.length})`}
+                          </button>
+                        </div>
+                        
+                        <div className="p-2 max-h-64 overflow-y-auto">
+                          {selectedCategory === 'Custom' ? (
+                            <div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  fileInputRef.current?.click();
+                                }}
+                                disabled={isUploading}
+                                className="w-full mb-2 px-3 py-2 text-sm rounded-lg transition flex items-center justify-center gap-2"
+                                style={{
+                                  backgroundColor: isUploading ? 'var(--color-bgTertiary)' : 'var(--color-primary)',
+                                  color: theme.name === 'terminal' ? '#000' : '#fff',
+                                  fontSize: 'var(--sizing-textSm)',
+                                }}
+                              >
+                                {isUploading ? (
+                                  <>
+                                    <div style={{ width: '1rem', height: '1rem', border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                                    Uploading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="w-4 h-4" />
+                                    Upload Custom Emoji
+                                  </>
+                                )}
+                              </button>
+                              
+                              {customEmojis.length > 0 ? (
+                                <div className="grid grid-cols-6 gap-2">
+                                  {customEmojis.map((emoji, index) => {
+                                    if (!emoji.blobUrl) return null;
+                                    
+                                    return (
+                                      <button
+                                        key={`custom-${index}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleReaction(eventId, emoji.mxcUrl);
+                                        }}
+                                        className="p-1 hover:bg-[var(--color-hover)] transition relative group"
+                                        title={emoji.name}
+                                      >
+                                        <img 
+                                          src={emoji.blobUrl} 
+                                          alt={emoji.name}
+                                          className="w-8 h-8 object-contain"
+                                          onError={(e) => {
+                                            console.error('Failed to load custom emoji blob:', emoji.mxcUrl);
+                                            e.currentTarget.style.display = 'none';
+                                          }}
+                                        />
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <p style={{ textAlign: 'center', color: 'var(--color-textMuted)', fontSize: 'var(--sizing-textSm)' }}>
+                                  No custom emojis yet
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-8 gap-1">
+                              {(emojiCategories[selectedCategory as keyof typeof emojiCategories] || []).map((emoji, index) => (
+                                <button
+                                  key={`${selectedCategory}-${index}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReaction(eventId, emoji);
+                                  }}
+                                  className="p-1 text-2xl hover:bg-[var(--color-hover)] transition hover:scale-110"
+                                  title={emoji}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }
+            
+            // Bubble-style rendering (default)
             return (
               <div
                 key={eventId}
@@ -676,9 +1473,16 @@ const MessageTimeline: React.FC = () => {
                           </div>
                         ) : (
                           <>
-                            <div className="markdown-body">
-                              {renderMessageWithMentions(content.body || '')}
-                            </div>
+                            {/* Text content - only show if not media-only or if it has a caption */}
+                            {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video')) && (
+                              <div className="markdown-body">
+                                {renderMessageWithMentions(content.body || '')}
+                              </div>
+                            )}
+                            
+                            {/* Media content (images, videos, files) */}
+                            <MediaRenderer content={content} />
+                            
                             {isEncrypted && (
                               <div className="flex items-center gap-1 mt-1 text-xs opacity-50">
                                 <Lock className="w-3 h-3" />
@@ -804,26 +1608,37 @@ const MessageTimeline: React.FC = () => {
                                   {/* Custom emoji grid */}
                                   {customEmojis.length > 0 ? (
                                     <div className="grid grid-cols-6 gap-2">
-                                      {customEmojis.map((emoji, index) => (
-                                        <button
-                                          key={`custom-${index}`}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleReaction(eventId, emoji.url);
-                                          }}
-                                          className="p-1 hover:bg-slate-700 rounded-lg transition relative group"
-                                          title={emoji.name}
-                                        >
-                                          <img 
-                                            src={emoji.url} 
-                                            alt={emoji.name}
-                                            className="w-8 h-8 object-contain"
-                                          />
-                                          <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-slate-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
-                                            {emoji.name}
-                                          </span>
-                                        </button>
-                                      ))}
+                                      {customEmojis.map((emoji, index) => {
+                                        if (!emoji.blobUrl) {
+                                          console.warn('No blob URL for emoji:', emoji.name);
+                                          return null;
+                                        }
+                                        
+                                        return (
+                                          <button
+                                            key={`custom-${index}`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleReaction(eventId, emoji.mxcUrl);
+                                            }}
+                                            className="p-1 hover:bg-slate-700 rounded-lg transition relative group"
+                                            title={emoji.name}
+                                          >
+                                            <img 
+                                              src={emoji.blobUrl} 
+                                              alt={emoji.name}
+                                              className="w-8 h-8 object-contain"
+                                              onError={(e) => {
+                                                console.error('Failed to load custom emoji blob:', emoji.mxcUrl);
+                                                e.currentTarget.style.display = 'none';
+                                              }}
+                                            />
+                                            <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-slate-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
+                                              {emoji.name}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
                                     </div>
                                   ) : (
                                     <p className="text-center text-slate-400 text-sm py-4">
@@ -857,8 +1672,15 @@ const MessageTimeline: React.FC = () => {
                       {Object.keys(reactions).length > 0 && (
                         <div className="flex gap-1 mt-1 flex-wrap">
                           {Object.entries(reactions).map(([emoji, data]) => {
-                            // Check if it's a custom emoji (URL)
-                            const isCustomEmoji = emoji.startsWith('http');
+                            // Check if it's a custom emoji (MXC URL)
+                            const isCustomEmoji = emoji.startsWith('mxc://');
+                            
+                            // Find if we have this emoji cached
+                            const cachedEmoji = isCustomEmoji 
+                              ? customEmojis.find(e => e.mxcUrl === emoji)
+                              : null;
+                            
+                            const displayEmoji = cachedEmoji?.blobUrl || emoji;
                             
                             return (
                               <button
@@ -871,10 +1693,18 @@ const MessageTimeline: React.FC = () => {
                                 }`}
                                 title={data.userReacted ? 'Click to remove your reaction' : 'Click to react'}
                               >
-                                {isCustomEmoji ? (
-                                  <img src={emoji} alt="custom emoji" className="w-5 h-5 object-contain" />
+                                {isCustomEmoji && cachedEmoji?.blobUrl ? (
+                                  <img 
+                                    src={cachedEmoji.blobUrl} 
+                                    alt="custom emoji" 
+                                    className="w-5 h-5 object-contain"
+                                    onError={(e) => {
+                                      console.error('Failed to load custom emoji reaction:', emoji);
+                                      e.currentTarget.style.display = 'none';
+                                    }}
+                                  />
                                 ) : (
-                                  <span>{emoji}</span>
+                                  <span>{isCustomEmoji ? '🖼️' : emoji}</span>
                                 )}
                                 <span className={data.userReacted ? 'text-white' : 'text-slate-400'}>{data.count}</span>
                               </button>

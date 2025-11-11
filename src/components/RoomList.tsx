@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useMatrix } from '../MatrixContext';
+import { useTheme } from '../ThemeContext';
 import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock } from 'lucide-react';
 import { Room } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
+import ThemeSelector from './ThemeSelector';
 
 const RoomList: React.FC = () => {
   const { rooms, spaces, currentRoom, setCurrentRoom, logout, client } = useMatrix();
+  const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(true);
@@ -97,37 +100,101 @@ const RoomList: React.FC = () => {
     const avatarUrl = getRoomAvatarUrl(room, client, 32);
     const initials = getRoomInitials(room.name);
 
+    const displayName = theme.style.showRoomPrefix 
+      ? `${theme.style.roomPrefix}${room.name}`
+      : room.name;
+
     return (
       <button
         onClick={() => setCurrentRoom(room)}
-        className={`w-full px-4 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition ${
-          isActive ? 'bg-slate-700 border-l-4 border-primary-500' : ''
-        } ${indent ? 'pl-12' : ''}`}
+        className={`w-full flex items-center transition ${
+          isActive ? 'border-l-2' : ''
+        } ${indent ? 'pl-8' : ''}`}
+        style={{
+          padding: theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '0.75rem 1rem',
+          gap: theme.style.compactMode ? 'var(--spacing-roomItemGap)' : '0.5rem',
+          backgroundColor: isActive ? 'var(--color-hover)' : 'transparent',
+          borderLeftColor: isActive ? 'var(--color-primary)' : 'transparent',
+          borderRadius: 'var(--sizing-borderRadius)',
+          fontSize: 'var(--sizing-textBase)',
+        }}
+        onMouseEnter={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }
+        }}
       >
-        {/* Room Avatar or Initials */}
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt={room.name}
-            className="w-6 h-6 rounded-md flex-shrink-0 object-cover"
-          />
-        ) : (
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
-            {initials}
-          </div>
+        {/* Room Avatar or Initials - Hide in compact mode */}
+        {!theme.style.compactMode && (
+          <>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={room.name}
+                className="flex-shrink-0 object-cover"
+                style={{
+                  width: 'var(--sizing-avatarSizeSmall)',
+                  height: 'var(--sizing-avatarSizeSmall)',
+                  borderRadius: 'var(--sizing-borderRadius)',
+                }}
+              />
+            ) : (
+              <div 
+                className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
+                style={{
+                  width: 'var(--sizing-avatarSizeSmall)',
+                  height: 'var(--sizing-avatarSizeSmall)',
+                  borderRadius: 'var(--sizing-borderRadius)',
+                  fontSize: 'var(--sizing-textXs)',
+                  color: 'var(--color-text)',
+                }}
+              >
+                {initials}
+              </div>
+            )}
+          </>
         )}
-        <div className="flex-1 min-w-0 text-left flex items-center gap-1">
-          <p className={`text-sm font-medium truncate ${
-            isActive ? 'text-white' : 'text-slate-300'
-          }`}>
-            {room.name}
+        <div className="flex-1 min-w-0 text-left flex items-center" style={{ gap: '0.25rem' }}>
+          <p 
+            className="font-medium truncate"
+            style={{
+              color: isActive ? 'var(--color-text)' : 'var(--color-textSecondary)',
+              fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
+            }}
+          >
+            {displayName}
           </p>
           {isEncrypted && (
-            <Lock className="w-3 h-3 text-green-400 flex-shrink-0" title="Encrypted room" />
+            <Lock 
+              className="flex-shrink-0" 
+              style={{ 
+                width: theme.style.compactMode ? '0.7rem' : '0.75rem',
+                height: theme.style.compactMode ? '0.7rem' : '0.75rem',
+                color: 'var(--color-success)',
+              }} 
+              title="Encrypted room" 
+            />
           )}
         </div>
-        {unreadCount && (
-          <div className="bg-primary-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">
+        {unreadCount > 0 && (
+          <div 
+            className="font-bold flex items-center justify-center flex-shrink-0"
+            style={{
+              backgroundColor: 'var(--color-primary)',
+              color: theme.name === 'terminal' ? '#000' : '#fff',
+              fontSize: 'var(--sizing-textXs)',
+              borderRadius: theme.style.compactMode ? '0' : '9999px',
+              width: theme.style.compactMode ? 'auto' : '1.25rem',
+              height: theme.style.compactMode ? 'auto' : '1.25rem',
+              padding: theme.style.compactMode ? '0.125rem 0.25rem' : '0',
+              minWidth: theme.style.compactMode ? 'auto' : '1.25rem',
+            }}
+          >
             {unreadCount > 9 ? '9+' : unreadCount}
           </div>
         )}
@@ -136,45 +203,135 @@ const RoomList: React.FC = () => {
   };
 
   return (
-    <div className="w-80 bg-slate-800 flex flex-col border-r border-slate-700 h-full flex-shrink-0">
+    <div 
+      className="w-80 flex flex-col h-full flex-shrink-0"
+      style={{
+        backgroundColor: 'var(--color-bgSecondary)',
+        borderRight: '1px solid var(--color-border)',
+      }}
+    >
       {/* Header */}
-      <div className="p-4 border-b border-slate-700 flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-white">NyChatt</h2>
+      <div 
+        className="flex-shrink-0"
+        style={{
+          padding: 'var(--spacing-sidebarPadding)',
+          borderBottom: '1px solid var(--color-border)',
+        }}
+      >
+        <div 
+          className="flex items-center justify-between"
+          style={{
+            marginBottom: theme.style.compactMode ? '0.25rem' : '1rem',
+          }}
+        >
+          <h2 
+            className="font-bold"
+            style={{
+              fontSize: theme.style.compactMode ? 'var(--sizing-textLg)' : 'var(--sizing-textXl)',
+              color: 'var(--color-text)',
+            }}
+          >
+            {theme.style.compactMode ? '> NyChatt' : 'NyChatt'}
+          </h2>
           <button
             onClick={logout}
-            className="p-2 hover:bg-slate-700 rounded-lg transition text-slate-400 hover:text-white"
+            className="transition"
+            style={{
+              padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
+              borderRadius: 'var(--sizing-borderRadius)',
+              color: 'var(--color-textMuted)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+              e.currentTarget.style.color = 'var(--color-text)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--color-textMuted)';
+            }}
             title="Logout"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
           </button>
         </div>
 
         {/* Search */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
+          <Search 
+            className="absolute transform -translate-y-1/2" 
+            style={{
+              left: theme.style.compactMode ? '0.5rem' : '0.75rem',
+              top: '50%',
+              width: theme.style.compactMode ? '0.75rem' : '1rem',
+              height: theme.style.compactMode ? '0.75rem' : '1rem',
+              color: 'var(--color-textMuted)',
+            }}
+          />
           <input
             type="text"
-            placeholder="Search rooms..."
+            placeholder={theme.style.compactMode ? '> search...' : 'Search rooms...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition text-sm"
+            className="w-full transition"
+            style={{
+              paddingLeft: theme.style.compactMode ? '1.75rem' : '2.5rem',
+              paddingRight: theme.style.compactMode ? '0.5rem' : '1rem',
+              paddingTop: theme.style.compactMode ? '0.25rem' : '0.5rem',
+              paddingBottom: theme.style.compactMode ? '0.25rem' : '0.5rem',
+              backgroundColor: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--sizing-borderRadius)',
+              color: 'var(--color-text)',
+              fontSize: 'var(--sizing-textSm)',
+            }}
           />
         </div>
       </div>
 
       {/* User info */}
-      <div className="px-4 py-3 bg-slate-900/30 border-b border-slate-700 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white font-semibold">
-            {getUserDisplayName().charAt(1).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white truncate">{getUserDisplayName()}</p>
-            <p className="text-xs text-slate-400">Online</p>
+      {!theme.style.compactMode && (
+        <div 
+          className="flex-shrink-0"
+          style={{
+            padding: 'var(--spacing-sidebarPadding)',
+            backgroundColor: 'var(--color-bg)',
+            borderBottom: '1px solid var(--color-border)',
+          }}
+        >
+          <div className="flex items-center" style={{ gap: '0.75rem' }}>
+            <div 
+              className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold"
+              style={{
+                width: 'var(--sizing-avatarSize)',
+                height: 'var(--sizing-avatarSize)',
+                borderRadius: 'var(--sizing-borderRadius)',
+                color: 'var(--color-text)',
+              }}
+            >
+              {getUserDisplayName().charAt(1).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p 
+                className="font-medium truncate"
+                style={{
+                  fontSize: 'var(--sizing-textSm)',
+                  color: 'var(--color-text)',
+                }}
+              >
+                {getUserDisplayName()}
+              </p>
+              <p 
+                style={{
+                  fontSize: 'var(--sizing-textXs)',
+                  color: 'var(--color-textMuted)',
+                }}
+              >
+                Online
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Tree Navigation */}
       <div className="flex-1 overflow-y-auto">
@@ -287,6 +444,11 @@ const RoomList: React.FC = () => {
             })}
           </div>
         )}
+      </div>
+
+      {/* Theme Selector - Footer */}
+      <div className="border-t border-slate-700 p-3 flex-shrink-0 mt-auto" style={{ backgroundColor: 'var(--color-bgSecondary)' }}>
+        <ThemeSelector />
       </div>
     </div>
   );

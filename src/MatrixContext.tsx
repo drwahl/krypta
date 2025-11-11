@@ -114,6 +114,10 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             await restoredClient.initCrypto();
             console.log('✅ Crypto initialized from cache');
             
+            // Allow sending to unverified devices (like Element does)
+            restoredClient.setGlobalErrorOnUnknownDevices(false);
+            console.log('✅ Crypto configured to allow unverified devices');
+            
             restoredClient.on('crypto.verification.request' as any, (request: any) => {
               setVerificationRequest(request);
             });
@@ -322,6 +326,10 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         
         await loggedInClient.initCrypto();
         console.log('✅ Crypto initialized successfully');
+        
+        // Allow sending to unverified devices (like Element does)
+        loggedInClient.setGlobalErrorOnUnknownDevices(false);
+        console.log('✅ Crypto configured to allow unverified devices');
         
         // Listen for verification requests
         loggedInClient.on('crypto.verification.request' as any, (request: any) => {
@@ -731,6 +739,10 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             
             await restoredClient.initCrypto();
             console.log('✅ Crypto initialized successfully (restored session)');
+            
+            // Allow sending to unverified devices (like Element does)
+            restoredClient.setGlobalErrorOnUnknownDevices(false);
+            console.log('✅ Crypto configured to allow unverified devices');
             
             // Listen for verification requests
             restoredClient.on('crypto.verification.request' as any, (request: any) => {
