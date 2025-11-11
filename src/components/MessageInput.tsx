@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useMatrix } from '../MatrixContext';
+import { useTheme } from '../ThemeContext';
 import { Send, Paperclip, Smile } from 'lucide-react';
 
 interface UserSuggestion {
@@ -9,6 +10,7 @@ interface UserSuggestion {
 
 const MessageInput: React.FC = () => {
   const { currentRoom, sendMessage, client } = useMatrix();
+  const { theme } = useTheme();
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [userSuggestions, setUserSuggestions] = useState<UserSuggestion[]>([]);
@@ -211,44 +213,135 @@ const MessageInput: React.FC = () => {
   }
 
   return (
-    <div className="bg-slate-800 border-t border-slate-700 p-4 flex-shrink-0 relative">
+    <div 
+      className="flex-shrink-0 relative"
+      style={{
+        backgroundColor: 'var(--color-bgSecondary)',
+        borderTop: '1px solid var(--color-border)',
+        padding: theme.style.compactMode ? 'var(--spacing-inputPadding)' : '1rem',
+      }}
+    >
       {/* User mention autocomplete dropdown */}
       {userSuggestions.length > 0 && (
         <div 
           ref={suggestionsRef}
-          className="absolute bottom-full left-4 right-4 mb-2 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl max-h-64 overflow-y-auto z-50"
+          className="absolute bottom-full mb-2 shadow-2xl max-h-64 overflow-y-auto z-50"
+          style={{
+            left: theme.style.compactMode ? '0.5rem' : '1rem',
+            right: theme.style.compactMode ? '0.5rem' : '1rem',
+            backgroundColor: 'var(--color-bgSecondary)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--sizing-borderRadius)',
+          }}
         >
           {userSuggestions.map((user, index) => (
             <button
               key={user.userId}
               type="button"
               onClick={() => insertMention(user)}
-              className={`w-full px-4 py-2 text-left hover:bg-slate-700 transition flex items-center gap-3 ${
-                index === selectedSuggestionIndex ? 'bg-slate-700' : ''
-              }`}
+              className="w-full text-left transition flex items-center"
+              style={{
+                padding: theme.style.compactMode ? '0.25rem 0.5rem' : '0.5rem 1rem',
+                gap: '0.75rem',
+                backgroundColor: index === selectedSuggestionIndex ? 'var(--color-hover)' : 'transparent',
+                color: 'var(--color-text)',
+                fontSize: 'var(--sizing-textBase)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+              }}
+              onMouseLeave={(e) => {
+                if (index !== selectedSuggestionIndex) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
             >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
-                {user.displayName.charAt(0).toUpperCase()}
-              </div>
+              {!theme.style.compactMode && (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+                  {user.displayName.charAt(0).toUpperCase()}
+                </div>
+              )}
               <div className="flex-1 min-w-0">
-                <div className="text-white font-medium truncate">{user.displayName}</div>
-                <div className="text-slate-400 text-xs truncate">{user.userId}</div>
+                <div 
+                  className="font-medium truncate"
+                  style={{ 
+                    color: 'var(--color-text)',
+                    fontSize: 'var(--sizing-textBase)',
+                  }}
+                >
+                  {user.displayName}
+                </div>
+                {!theme.style.compactMode && (
+                  <div 
+                    className="text-xs truncate"
+                    style={{ color: 'var(--color-textMuted)' }}
+                  >
+                    {user.userId}
+                  </div>
+                )}
               </div>
             </button>
           ))}
         </div>
       )}
       
-      <form onSubmit={handleSubmit} className="flex items-end gap-3">
-        <button
-          type="button"
-          className="p-2 hover:bg-slate-700 rounded-lg transition text-slate-400 hover:text-white mb-1"
-          title="Attach file"
-        >
-          <Paperclip className="w-5 h-5" />
-        </button>
+      <form 
+        onSubmit={handleSubmit} 
+        className="flex items-end"
+        style={{ gap: theme.style.compactMode ? '0.5rem' : '0.75rem' }}
+      >
+        {!theme.style.compactMode && (
+          <button
+            type="button"
+            className="transition"
+            style={{
+              padding: '0.5rem',
+              borderRadius: 'var(--sizing-borderRadius)',
+              color: 'var(--color-textMuted)',
+              marginBottom: '0.25rem',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+              e.currentTarget.style.color = 'var(--color-text)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--color-textMuted)';
+            }}
+            title="Attach file"
+          >
+            <Paperclip className="w-5 h-5" />
+          </button>
+        )}
 
-        <div className="flex-1 bg-slate-900/50 border border-slate-600 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-transparent transition">
+        <div 
+          className="flex-1 overflow-hidden transition"
+          style={{
+            backgroundColor: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--sizing-borderRadius)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: theme.style.compactMode ? '0.25rem' : '0.5rem',
+            paddingLeft: theme.style.compactMode ? '0.5rem' : '1rem',
+            paddingRight: theme.style.compactMode ? '0.5rem' : '1rem',
+          }}
+        >
+          {/* Terminal-style prompt for compact mode */}
+          {theme.style.compactMode && (
+            <span 
+              style={{ 
+                color: 'var(--color-primary)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--sizing-textBase)',
+                fontWeight: 'bold',
+                flexShrink: 0,
+              }}
+            >
+              &gt;
+            </span>
+          )}
+          
           <textarea
             ref={textareaRef}
             value={message}
@@ -270,34 +363,85 @@ const MessageInput: React.FC = () => {
                 setMentionStart(-1);
               }, 200);
             }}
-            placeholder={`Message ${currentRoom.name}`}
-            className="w-full px-4 py-3 bg-transparent text-white placeholder-slate-500 focus:outline-none resize-none"
+            placeholder={theme.style.compactMode ? '' : `Message ${currentRoom.name}`}
+            className="w-full bg-transparent focus:outline-none resize-none"
+            style={{
+              color: 'var(--color-text)',
+              fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
+              fontSize: 'var(--sizing-textBase)',
+              padding: theme.style.compactMode ? '0.25rem 0' : '0.75rem 0',
+              maxHeight: '200px',
+            }}
             rows={1}
-            style={{ maxHeight: '200px' }}
           />
         </div>
 
-        <button
-          type="button"
-          className="p-2 hover:bg-slate-700 rounded-lg transition text-slate-400 hover:text-white mb-1"
-          title="Add emoji"
-        >
-          <Smile className="w-5 h-5" />
-        </button>
+        {!theme.style.compactMode && (
+          <button
+            type="button"
+            className="transition"
+            style={{
+              padding: '0.5rem',
+              borderRadius: 'var(--sizing-borderRadius)',
+              color: 'var(--color-textMuted)',
+              marginBottom: '0.25rem',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+              e.currentTarget.style.color = 'var(--color-text)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--color-textMuted)';
+            }}
+            title="Add emoji"
+          >
+            <Smile className="w-5 h-5" />
+          </button>
+        )}
 
         <button
           type="submit"
           disabled={!message.trim()}
-          className="bg-primary-600 hover:bg-primary-700 disabled:bg-slate-700 disabled:text-slate-500 text-white p-2 rounded-lg transition mb-1 disabled:cursor-not-allowed"
+          className="transition"
+          style={{
+            backgroundColor: message.trim() ? 'var(--color-primary)' : 'var(--color-bgTertiary)',
+            color: message.trim() ? (theme.name === 'terminal' ? '#000' : '#fff') : 'var(--color-textMuted)',
+            padding: theme.style.compactMode ? '0.25rem 0.5rem' : '0.5rem',
+            borderRadius: 'var(--sizing-borderRadius)',
+            marginBottom: theme.style.compactMode ? '0' : '0.25rem',
+            cursor: message.trim() ? 'pointer' : 'not-allowed',
+            fontSize: theme.style.compactMode ? 'var(--sizing-textBase)' : undefined,
+            fontFamily: theme.style.compactMode ? 'var(--font-mono)' : undefined,
+            fontWeight: theme.style.compactMode ? 'bold' : undefined,
+          }}
+          onMouseEnter={(e) => {
+            if (message.trim()) {
+              e.currentTarget.style.backgroundColor = 'var(--color-primaryHover)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (message.trim()) {
+              e.currentTarget.style.backgroundColor = 'var(--color-primary)';
+            }
+          }}
           title="Send message"
         >
-          <Send className="w-5 h-5" />
+          {theme.style.compactMode ? '↵' : <Send className="w-5 h-5" />}
         </button>
       </form>
 
-      <div className="mt-2 text-xs text-slate-500">
-        <span className="font-medium">@username</span> to mention • <span className="font-medium">Tab</span> to autocomplete • <span className="font-medium">Shift + Enter</span> for new line • <span className="font-medium">Enter</span> to send
-      </div>
+      {!theme.style.compactMode && (
+        <div 
+          className="mt-2"
+          style={{
+            fontSize: 'var(--sizing-textXs)',
+            color: 'var(--color-textMuted)',
+          }}
+        >
+          <span className="font-medium">@username</span> to mention • <span className="font-medium">Tab</span> to autocomplete • <span className="font-medium">Shift + Enter</span> for new line • <span className="font-medium">Enter</span> to send
+        </div>
+      )}
     </div>
   );
 };

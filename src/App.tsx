@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { MatrixProvider, useMatrix } from './MatrixContext';
 import { ThreadsProvider } from './contexts/ThreadsContext';
 import { ThemeProvider } from './ThemeContext';
+import { MultiRoomProvider, useMultiRoom } from './contexts/MultiRoomContext';
 import Login from './components/Login';
 import RoomList from './components/RoomList';
-import MessageTimeline from './components/MessageTimeline';
-import MessageInput from './components/MessageInput';
+import RoomPane from './components/RoomPane';
 import ErrorBoundary from './components/ErrorBoundary';
 import VerificationBanner from './components/VerificationBanner';
 import VerificationModal from './components/VerificationModal';
@@ -14,6 +14,7 @@ import { Loader2, MessageSquare } from 'lucide-react';
 
 const ChatApp: React.FC = () => {
   const { isLoggedIn, isLoading } = useMatrix();
+  const { openRooms, activeRoomId } = useMultiRoom();
   const [showThreads, setShowThreads] = useState(true);
 
   if (isLoading) {
@@ -36,11 +37,42 @@ const ChatApp: React.FC = () => {
       {/* Room List */}
       <RoomList />
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main Chat Area - Multi-pane view */}
+      <div className="flex-1 flex flex-col min-h-0">
         <VerificationBanner />
-        <MessageTimeline />
-        <MessageInput />
+        
+        {openRooms.length === 0 ? (
+          <div 
+            className="flex-1 flex items-center justify-center"
+            style={{ backgroundColor: 'var(--color-bg)' }}
+          >
+            <div className="text-center">
+              <div className="text-6xl mb-4">💬</div>
+              <p 
+                className="text-lg mb-2"
+                style={{ color: 'var(--color-text)' }}
+              >
+                Select a room to start chatting
+              </p>
+              <p 
+                className="text-sm"
+                style={{ color: 'var(--color-textMuted)' }}
+              >
+                Click on rooms in the sidebar to open them
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex min-h-0">
+            {openRooms.map((room) => (
+              <RoomPane
+                key={room.roomId}
+                room={room}
+                isActive={activeRoomId === room.roomId}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Thread Sidebar Toggle Button (for responsive design) */}
@@ -72,9 +104,11 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <ThemeProvider>
         <MatrixProvider>
-          <ThreadsProvider>
-            <ChatApp />
-          </ThreadsProvider>
+          <MultiRoomProvider>
+            <ThreadsProvider>
+              <ChatApp />
+            </ThreadsProvider>
+          </MultiRoomProvider>
         </MatrixProvider>
       </ThemeProvider>
     </ErrorBoundary>

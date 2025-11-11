@@ -424,25 +424,27 @@ const MessageTimeline: React.FC = () => {
     setShowCallFrame(true);
   };
 
-  // Fetch authenticated media and convert to blob URL
+  // Fetch authenticated media for custom emojis (creates blob URLs for caching)
   const fetchAuthenticatedMedia = useCallback(async (mxcUrl: string): Promise<string | null> => {
     if (!client) return null;
     
     try {
       const httpUrl = client.mxcUrlToHttp(mxcUrl);
-      if (!httpUrl) return null;
+      if (!httpUrl) {
+        console.error('Failed to convert MXC URL to HTTP:', mxcUrl);
+        return null;
+      }
       
       const accessToken = client.getAccessToken();
       
-      // Fetch with authentication
-      const response = await fetch(httpUrl, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      });
+      // Matrix media endpoints expect access_token as query parameter
+      const urlWithAuth = `${httpUrl}${httpUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`;
+      
+      // Fetch with authentication via query parameter
+      const response = await fetch(urlWithAuth);
       
       if (!response.ok) {
-        console.error('Failed to fetch media:', response.status, response.statusText);
+        console.error('Failed to fetch media:', response.status, response.statusText, mxcUrl);
         return null;
       }
       
@@ -450,7 +452,7 @@ const MessageTimeline: React.FC = () => {
       const blobUrl = URL.createObjectURL(blob);
       return blobUrl;
     } catch (error) {
-      console.error('Error fetching authenticated media:', error);
+      console.error('Error fetching authenticated media:', mxcUrl, error);
       return null;
     }
   }, [client]);
@@ -501,48 +503,18 @@ const MessageTimeline: React.FC = () => {
     loadCustomEmojis();
   }, [client, fetchAuthenticatedMedia]);
 
-  // Media renderer component (as a sub-component to handle state)
-  const MediaRenderer: React.FC<{ content: any }> = ({ content }) => {
+  // Media renderer component - uses direct authenticated URLs for better performance
+  const MediaRenderer: React.FC<{ content: any }> = React.memo(({ content }) => {
     const msgtype = content.msgtype;
     const mxcUrl = content.url;
-    const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
-    const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
-    
-    useEffect(() => {
-      if (!mxcUrl || !client) return;
-      
-      let mounted = true;
-      
-      const loadMedia = async () => {
-        // Load main media
-        const blobUrl = await fetchAuthenticatedMedia(mxcUrl);
-        if (mounted && blobUrl) {
-          setMediaBlobUrl(blobUrl);
-        }
-        
-        // Load thumbnail if available (for images)
-        if (msgtype === 'm.image' && content.info?.thumbnail_url) {
-          const thumbUrl = await fetchAuthenticatedMedia(content.info.thumbnail_url);
-          if (mounted && thumbUrl) {
-            setThumbnailBlobUrl(thumbUrl);
-          }
-        }
-      };
-      
-      loadMedia();
-      
-      return () => {
-        mounted = false;
-        // Clean up blob URLs when component unmounts
-        if (mediaBlobUrl) URL.revokeObjectURL(mediaBlobUrl);
-        if (thumbnailBlobUrl) URL.revokeObjectURL(thumbnailBlobUrl);
-      };
-    }, [mxcUrl, msgtype, content.info?.thumbnail_url]);
     
     if (!mxcUrl || !client) return null;
     
     const httpUrl = client.mxcUrlToHttp(mxcUrl);
     if (!httpUrl) return null;
+    
+    const accessToken = client.getAccessToken();
+    const authenticatedUrl = `${httpUrl}${httpUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`;
     
     const filename = content.body || 'file';
     const filesize = content.info?.size;
@@ -550,19 +522,18 @@ const MessageTimeline: React.FC = () => {
     // Images
     if (msgtype === 'm.image') {
       const width = content.info?.w;
-      const displayUrl = thumbnailBlobUrl || mediaBlobUrl;
+      const thumbnailUrl = content.info?.thumbnail_url 
+        ? client.mxcUrlToHttp(content.info.thumbnail_url)
+        : null;
+      const authenticatedThumbnailUrl = thumbnailUrl 
+        ? `${thumbnailUrl}${thumbnailUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`
+        : null;
       
-      if (!displayUrl) {
-        return (
-          <div className="mt-2 text-slate-400 text-sm">
-            Loading image...
-          </div>
-        );
-      }
+      const displayUrl = authenticatedThumbnailUrl || authenticatedUrl;
       
       return (
         <div className="mt-2">
-          <a href={mediaBlobUrl || httpUrl} target="_blank" rel="noopener noreferrer">
+          <a href={authenticatedUrl} target="_blank" rel="noopener noreferrer">
             <img
               src={displayUrl}
               alt={filename}
@@ -580,18 +551,10 @@ const MessageTimeline: React.FC = () => {
     
     // Videos
     if (msgtype === 'm.video') {
-      if (!mediaBlobUrl) {
-        return (
-          <div className="mt-2 text-slate-400 text-sm">
-            Loading video...
-          </div>
-        );
-      }
-      
       return (
         <div className="mt-2">
           <video
-            src={mediaBlobUrl}
+            src={authenticatedUrl}
             controls
             className="max-w-sm max-h-96 rounded-lg"
             preload="metadata"
@@ -605,17 +568,14 @@ const MessageTimeline: React.FC = () => {
       );
     }
     
-    // Files - use direct link with download attribute
+    // Files
     if (msgtype === 'm.file') {
       const filesizeStr = filesize ? `(${(filesize / 1024).toFixed(1)} KB)` : '';
-      
-      // For files, use the authenticated blob URL if available, otherwise fallback to direct link
-      const downloadUrl = mediaBlobUrl || httpUrl;
       
       return (
         <div className="mt-2">
           <a
-            href={downloadUrl}
+            href={authenticatedUrl}
             download={filename}
             className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm"
           >
@@ -628,7 +588,7 @@ const MessageTimeline: React.FC = () => {
     }
     
     return null;
-  };
+  });
 
   // Handle custom emoji upload
   const handleEmojiUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1047,9 +1007,19 @@ const MessageTimeline: React.FC = () => {
   const hasElementCall = isElementCallRoom();
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-900 min-h-0">
+    <div 
+      className="flex-1 flex flex-col min-h-0"
+      style={{ backgroundColor: 'var(--color-bg)' }}
+    >
       {/* Room header */}
-      <div className="bg-slate-800 border-b border-slate-700 px-6 py-4 flex-shrink-0">
+      <div 
+        className="flex-shrink-0"
+        style={{
+          backgroundColor: 'var(--color-bgSecondary)',
+          borderBottom: '1px solid var(--color-border)',
+          padding: theme.style.compactMode ? 'var(--spacing-sidebarPadding)' : '1rem 1.5rem',
+        }}
+      >
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
@@ -1239,48 +1209,57 @@ const MessageTimeline: React.FC = () => {
                     </div>
                   )}
                   
-                  {/* Compact actions on hover */}
-                  {hoveredMessage === eventId && (
-                    <div style={{ display: 'flex', gap: '0.25rem', marginLeft: 'auto', flexShrink: 0 }}>
-                      <button
-                        onClick={() => {
-                          if (showEmojiPicker === eventId) {
-                            setShowEmojiPicker(null);
-                          } else {
-                            setShowEmojiPicker(eventId);
-                            setSelectedCategory('Smileys');
-                          }
-                        }}
-                        style={{
-                          backgroundColor: 'var(--color-bgTertiary)',
-                          color: 'var(--color-text)',
-                          padding: '0.125rem 0.25rem',
-                          fontSize: 'var(--sizing-textXs)',
-                          border: '1px solid var(--color-border)',
-                          cursor: 'pointer',
-                        }}
-                        title="Add reaction"
-                      >
-                        +
-                      </button>
-                      {isOwn && (
+                  {/* Compact actions on hover - use fixed width container to prevent bounce */}
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '0.25rem', 
+                    marginLeft: '0.5rem',
+                    flexShrink: 0,
+                    minWidth: isOwn ? '3rem' : '1.5rem', // Reserve space to prevent layout shift
+                    justifyContent: 'flex-end',
+                  }}>
+                    {hoveredMessage === eventId && (
+                      <>
                         <button
-                          onClick={() => handleDeleteMessage(eventId)}
+                          onClick={() => {
+                            if (showEmojiPicker === eventId) {
+                              setShowEmojiPicker(null);
+                            } else {
+                              setShowEmojiPicker(eventId);
+                              setSelectedCategory('Smileys');
+                            }
+                          }}
                           style={{
                             backgroundColor: 'var(--color-bgTertiary)',
-                            color: 'var(--color-error)',
+                            color: 'var(--color-text)',
                             padding: '0.125rem 0.25rem',
                             fontSize: 'var(--sizing-textXs)',
                             border: '1px solid var(--color-border)',
                             cursor: 'pointer',
                           }}
-                          title="Delete message"
+                          title="Add reaction"
                         >
-                          x
+                          +
                         </button>
-                      )}
-                    </div>
-                  )}
+                        {isOwn && (
+                          <button
+                            onClick={() => handleDeleteMessage(eventId)}
+                            style={{
+                              backgroundColor: 'var(--color-bgTertiary)',
+                              color: 'var(--color-error)',
+                              padding: '0.125rem 0.25rem',
+                              fontSize: 'var(--sizing-textXs)',
+                              border: '1px solid var(--color-border)',
+                              cursor: 'pointer',
+                            }}
+                            title="Delete message"
+                          >
+                            x
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                   
                   {/* Emoji picker for terminal mode (same as bubble mode but positioned differently) */}
                   {showEmojiPicker === eventId && (

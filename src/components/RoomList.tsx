@@ -1,14 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
+import { useMultiRoom } from '../contexts/MultiRoomContext';
 import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock } from 'lucide-react';
 import { Room } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import ThemeSelector from './ThemeSelector';
 
 const RoomList: React.FC = () => {
-  const { rooms, spaces, currentRoom, setCurrentRoom, logout, client } = useMatrix();
+  const { rooms, spaces, logout, client } = useMatrix();
   const { theme } = useTheme();
+  const { openRooms, addRoom, activeRoomId } = useMultiRoom();
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(true);
@@ -93,7 +95,8 @@ const RoomList: React.FC = () => {
   };
 
   const RoomItem: React.FC<{ room: Room; indent?: boolean }> = ({ room, indent = false }) => {
-    const isActive = currentRoom?.roomId === room.roomId;
+    const isOpen = openRooms.some(r => r.roomId === room.roomId);
+    const isActive = activeRoomId === room.roomId;
     const unreadCount = getUnreadCount(room);
     const members = room.getJoinedMemberCount();
     const isEncrypted = room.hasEncryptionStateEvent();
@@ -106,15 +109,15 @@ const RoomList: React.FC = () => {
 
     return (
       <button
-        onClick={() => setCurrentRoom(room)}
+        onClick={() => addRoom(room)}
         className={`w-full flex items-center transition ${
           isActive ? 'border-l-2' : ''
         } ${indent ? 'pl-8' : ''}`}
         style={{
           padding: theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '0.75rem 1rem',
           gap: theme.style.compactMode ? 'var(--spacing-roomItemGap)' : '0.5rem',
-          backgroundColor: isActive ? 'var(--color-hover)' : 'transparent',
-          borderLeftColor: isActive ? 'var(--color-primary)' : 'transparent',
+          backgroundColor: isActive ? 'var(--color-hover)' : (isOpen ? 'var(--color-bgTertiary)' : 'transparent'),
+          borderLeftColor: isActive ? 'var(--color-primary)' : (isOpen ? 'var(--color-accent)' : 'transparent'),
           borderRadius: 'var(--sizing-borderRadius)',
           fontSize: 'var(--sizing-textBase)',
         }}
