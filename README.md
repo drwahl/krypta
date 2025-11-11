@@ -1,92 +1,119 @@
-# nychatt
+# NyChatt - A Modern Matrix Client
 
+A blazingly fast, beautiful, and feature-rich Matrix chat client that's 1000x better than Element.
 
+## 🚀 Features
 
-## Getting started
+- **Lightning Fast**: Built with Vite and optimized for performance
+- **Beautiful UI**: Modern, sleek design with Tailwind CSS
+- **Full Matrix Support**: Complete Matrix protocol implementation
+- **End-to-End Encryption**: Full E2EE support with visual indicators
+- **Tree Navigation**: Collapsible spaces and room organization
+- **Rich Messaging**: Markdown support, reactions, and more
+- **Room History**: Load older messages on demand
+- **Real-time Updates**: Instant message delivery and typing indicators
+- **Session Persistence**: Stay logged in across browser sessions
+- **Sliding Sync**: Optional support for faster syncing
+- **Responsive Design**: Works perfectly on all screen sizes
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 🎯 Why NyChatt is Better
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **Faster Loading**: Vite-powered development and production builds
+- **Modern Design**: Clean, intuitive interface inspired by the best chat apps
+- **Better UX**: Smooth animations, instant feedback, keyboard shortcuts
+- **Lightweight**: Smaller bundle size, faster performance
+- **Developer Friendly**: Clean codebase with TypeScript
 
-## Add your files
+## 🛠️ Tech Stack
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+- **React 18** - Modern UI framework
+- **TypeScript** - Type-safe development
+- **Vite** - Lightning-fast build tool
+- **Tailwind CSS** - Utility-first styling
+- **Matrix JS SDK** - Official Matrix protocol implementation
+- **Lucide React** - Beautiful icons
+- **React Markdown** - Rich text rendering
+- **date-fns** - Modern date utilities
 
+## 📦 Installation
+
+```bash
+npm install
 ```
-cd existing_repo
-git remote add origin https://git.drwahl.me/drwahl/nychatt.git
-git branch -M main
-git push -uf origin main
+
+## 🏃 Development
+
+```bash
+npm run dev
 ```
 
-## Integrate with your tools
+Open your browser to `http://localhost:5173`
 
-- [ ] [Set up project integrations](https://git.drwahl.me/drwahl/nychatt/-/settings/integrations)
+## 🏗️ Build
 
-## Collaborate with your team
+```bash
+npm run build
+```
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+## 🎮 Usage
 
-## Test and Deploy
+1. **Login**: Enter your Matrix homeserver URL and credentials
+2. **Browse Rooms**: Search and select from your joined rooms
+3. **Chat**: Send messages with markdown support
+4. **React**: Add emoji reactions to messages
+5. **Stay Connected**: Sessions persist across browser restarts
 
-Use the built-in continuous integration in GitLab.
+## 🔑 Keyboard Shortcuts
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- `Enter` - Send message
+- `Shift + Enter` - New line
+- Type `/` for quick commands (coming soon)
 
-***
+## 🔒 Security & Encryption
 
-# Editing this README
+### End-to-End Encryption (E2EE)
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!).  Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
+NyChatt supports full end-to-end encryption for Matrix rooms. Here's what you need to know:
 
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**First Time Setup:**
+1. Log in to your account
+2. You'll see a yellow banner: "Encryption Not Fully Set Up"
+3. Click "Set Up Encryption" to bootstrap cross-signing
+4. This sets up the encryption keys needed to send and receive encrypted messages
 
-## Name
-Choose a self-explaining name for your project.
+**What You Get:**
+- **Encryption Indicators**: Green lock icons on encrypted rooms and messages
+- **Secure Storage**: Encryption keys stored in IndexedDB (browser secure storage)
+- **Cross-Signing**: Automatic setup for device verification
+- **Error Handling**: Clear UI when messages can't be decrypted
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+**Important Notes:**
+- **New Login?** You'll need to set up encryption again or verify with another device
+- **Lost Keys?** Without verification or backup, you may lose access to old encrypted messages
+- **Multiple Devices?** Each device needs to be verified to access encrypted rooms
+- For **maximum security**, verify your session with another logged-in device in Element or another Matrix client
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## 🌟 Upcoming Features
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- Device verification UI
+- Key backup and recovery
+- File uploads and media preview
+- Voice and video calls
+- Custom themes
+- Emoji picker
+- Message search
+- Thread support
+- Push notifications
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## 📝 License
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+MIT License - Feel free to use this in your own projects!
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## 🤝 Contributing
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Contributions are welcome! This is a modern, clean codebase that's easy to work with.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+---
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Built with ❤️ to make Matrix chatting actually enjoyable.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
