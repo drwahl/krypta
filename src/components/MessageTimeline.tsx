@@ -232,6 +232,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     isCallRoom: hasElementCall,
     callUrl,
     callIframeRef,
+    leaveCall,
   } = useElementCall(currentRoom, client);
   
   // Track if we're showing the call iframe
@@ -1037,7 +1038,15 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       {showCallFrame && callUrl && (
         <div className="relative bg-slate-900 border-b border-slate-700" style={{ height: '600px' }}>
           <button
-            onClick={() => setShowCallFrame(false)}
+            onClick={async () => {
+              try {
+                await leaveCall();
+              } catch (error) {
+                console.warn('Failed to hang up call', error);
+              } finally {
+                setShowCallFrame(false);
+              }
+            }}
             className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition font-medium shadow-lg flex items-center gap-2"
             title="Leave call"
           >

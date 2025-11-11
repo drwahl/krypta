@@ -1,8 +1,39 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { createClient, MatrixClient, ClientEvent, RoomEvent, Room, IndexedDBStore, IndexedDBCryptoStore } from 'matrix-js-sdk';
-import { MatrixContextType } from './types';
+import { createClient, MatrixClient, ClientEvent, RoomEvent, Room, IndexedDBStore, IndexedDBCryptoStore, MatrixEvent } from 'matrix-js-sdk';
+import { MatrixContextType, ThemeDefinition, ThemeServerDefault } from './types';
+import { Theme } from './themeTypes';
 
 const MatrixContext = createContext<MatrixContextType | undefined>(undefined);
+
+const THEME_DEFAULT_EVENT = 'com.nychatt.theme.default';
+const THEME_DEFINITION_EVENT = 'com.nychatt.theme.definition';
+
+const extractThemeFromContent = (content: any, fallbackName: string): Theme | null => {
+  if (!content || typeof content !== 'object') return null;
+
+  const colors = content.colors;
+  const fonts = content.fonts;
+  const spacing = content.spacing;
+  const sizing = content.sizing;
+  const style = content.style;
+
+  if (!colors || !fonts || !spacing || !sizing || !style) {
+    return null;
+  }
+
+  const name = typeof content.name === 'string' ? content.name : fallbackName;
+  const displayName = typeof content.displayName === 'string' ? content.displayName : name;
+
+  return {
+    name,
+    displayName,
+    colors: { ...colors },
+    fonts: { ...fonts },
+    spacing: { ...spacing },
+    sizing: { ...sizing },
+    style: { ...style },
+  };
+};
 
 export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [client, setClient] = useState<MatrixClient | null>(null);
@@ -10,28 +41,92 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [spaces, setSpaces] = useState<Room[]>([]);
+  const [invites, setInvites] = useState<Room[]>([]);
   const [isLoading, setIsLoading] = useState(false); // Start as not loading (auto-restore disabled)
   const [needsVerification, setNeedsVerification] = useState(false);
   const [verificationRequest, setVerificationRequest] = useState<any | null>(null);
+  const [roomThemeDefaults, setRoomThemeDefaults] = useState<Record<string, ThemeServerDefault>>({});
+  const [spaceThemeDefaults, setSpaceThemeDefaults] = useState<Record<string, ThemeServerDefault>>({});
+  const [themeDefinitions, setThemeDefinitions] = useState<Record<string, Record<string, ThemeDefinition>>>({});
 
-  // Helper to separate spaces from rooms
+  // Helper to separate spaces from rooms and invites
   const updateRoomsAndSpaces = useCallback((allRooms: Room[]) => {
     const roomsList: Room[] = [];
     const spacesList: Room[] = [];
+    const invitesList: Room[] = [];
+    const newRoomDefaults: Record<string, ThemeServerDefault> = {};
+    const newSpaceDefaults: Record<string, ThemeServerDefault> = {};
+    const newDefinitions: Record<string, Record<string, ThemeDefinition>> = {};
     
     allRooms.forEach((room) => {
+      // Check if this is an invite
+      const myMembership = room.getMyMembership();
+      if (myMembership === 'invite') {
+        invitesList.push(room);
+        return;
+      }
+      
       const createEvent = room.currentState.getStateEvents('m.room.create', '');
       const roomType = createEvent?.getContent()?.type;
+      const isSpace = roomType === 'm.space';
       
-      if (roomType === 'm.space') {
+      if (isSpace) {
         spacesList.push(room);
       } else {
         roomsList.push(room);
+      }
+
+      const defaultEvent = room.currentState.getStateEvents(THEME_DEFAULT_EVENT as any, '') as MatrixEvent | undefined;
+      if (defaultEvent) {
+        const content = defaultEvent.getContent();
+        if (content && typeof content.themeId === 'string') {
+          const entry: ThemeServerDefault = {
+            themeId: content.themeId,
+            applyToNewUsers: content.applyToNewUsers !== false,
+            updatedAt: typeof content.updatedAt === 'number' ? content.updatedAt : defaultEvent.getTs(),
+            updatedBy: typeof content.updatedBy === 'string' ? content.updatedBy : defaultEvent.getSender() ?? undefined,
+          };
+          if (isSpace) {
+            newSpaceDefaults[room.roomId] = entry;
+          } else {
+            newRoomDefaults[room.roomId] = entry;
+          }
+        }
+      }
+
+      const definitionEvents = room.currentState.getStateEvents(THEME_DEFINITION_EVENT as any) as MatrixEvent[] | undefined;
+      if (Array.isArray(definitionEvents)) {
+        definitionEvents.forEach((event) => {
+          const content = event.getContent();
+          const stateKey = event.getStateKey() || '';
+          const themeId = stateKey || (typeof content?.name === 'string' ? content.name : '');
+          if (!themeId) return;
+          const theme = extractThemeFromContent(content, themeId);
+          if (!theme) return;
+          theme.name = themeId;
+          const definition: ThemeDefinition = {
+            theme,
+            description: typeof content?.description === 'string' ? content.description : undefined,
+            origin: isSpace ? 'space' : 'room',
+            roomId: room.roomId,
+            stateKey: themeId,
+            updatedAt: typeof content?.updatedAt === 'number' ? content.updatedAt : event.getTs(),
+            updatedBy: typeof content?.updatedBy === 'string' ? content.updatedBy : event.getSender() ?? undefined,
+          };
+          if (!newDefinitions[room.roomId]) {
+            newDefinitions[room.roomId] = {};
+          }
+          newDefinitions[room.roomId][themeId] = definition;
+        });
       }
     });
     
     setRooms(roomsList);
     setSpaces(spacesList);
+    setInvites(invitesList);
+    setRoomThemeDefaults(newRoomDefaults);
+    setSpaceThemeDefaults(newSpaceDefaults);
+    setThemeDefinitions(newDefinitions);
   }, []);
 
   // Restore session from stored credentials on mount
@@ -168,10 +263,13 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
           });
 
-          restoredClient.on(RoomEvent.Timeline, () => {
+          const handleRestoredRoomUpdate = () => {
             const updatedRooms = restoredClient.getRooms();
             updateRoomsAndSpaces(updatedRooms);
-          });
+          };
+          
+          restoredClient.on(RoomEvent.Timeline, handleRestoredRoomUpdate);
+          restoredClient.on(RoomEvent.State, handleRestoredRoomUpdate);
 
           clearTimeout(restoreTimeout);
           setIsLoading(false);
@@ -324,8 +422,9 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.log('Final window.Olm:', (window as any).Olm);
         console.log('Final window.Olm.init:', (window as any).Olm?.init);
         
-        await loggedInClient.initCrypto();
-        console.log('✅ Crypto initialized successfully');
+        // In matrix-js-sdk v19+, crypto is initialized automatically when the client starts
+        // No need to call initCrypto() - it will happen during startClient()
+        console.log('✅ Crypto will be initialized automatically during client start');
         
         // Allow sending to unverified devices (like Element does)
         loggedInClient.setGlobalErrorOnUnknownDevices(false);
@@ -397,10 +496,13 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
 
       // Listen for room updates
-      loggedInClient.on(RoomEvent.Timeline, () => {
+      const handleRoomUpdate = () => {
         const updatedRooms = loggedInClient.getRooms();
         updateRoomsAndSpaces(updatedRooms);
-      });
+      };
+
+      loggedInClient.on(RoomEvent.Timeline, handleRoomUpdate);
+      loggedInClient.on(RoomEvent.State, handleRoomUpdate);
 
     } catch (error: any) {
       console.error('Login failed:', error);
@@ -476,13 +578,20 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setCurrentRoom(null);
       setRooms([]);
       setSpaces([]);
+      setInvites([]);
       setNeedsVerification(false);
       setVerificationRequest(null);
+      setRoomThemeDefaults({});
+      setSpaceThemeDefaults({});
+      setThemeDefinitions({});
       localStorage.removeItem('mx_homeserver');
       localStorage.removeItem('mx_access_token');
       localStorage.removeItem('mx_user_id');
       localStorage.removeItem('mx_device_id');
       localStorage.removeItem('mx_sliding_sync_proxy');
+      // Clear room selection state
+      localStorage.removeItem('nychatt_active_room_id');
+      localStorage.removeItem('nychatt_open_room_ids');
     }
   };
 
@@ -750,8 +859,9 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.log('window.Olm [restored]:', (window as any).Olm);
             console.log('window.Olm.init [restored]:', (window as any).Olm?.init);
             
-            await restoredClient.initCrypto();
-            console.log('✅ Crypto initialized successfully (restored session)');
+            // In matrix-js-sdk v19+, crypto is initialized automatically when the client starts
+            // No need to call initCrypto() - it will happen during startClient()
+            console.log('✅ Crypto will be initialized automatically during client start');
             
             // Allow sending to unverified devices (like Element does)
             restoredClient.setGlobalErrorOnUnknownDevices(false);
@@ -866,6 +976,119 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return null;
   }, [client, spaces]);
 
+  const setRoomServerThemeDefault = useCallback(
+    async (roomId: string, themeId: string, options?: { applyToNewUsers?: boolean }) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      const content: Record<string, unknown> = {
+        themeId,
+        applyToNewUsers: options?.applyToNewUsers !== false,
+        updatedAt: Date.now(),
+      };
+      const userId = client.getUserId();
+      if (userId) {
+        content.updatedBy = userId;
+      }
+      await client.sendStateEvent(roomId, THEME_DEFAULT_EVENT as any, content, '');
+    },
+    [client],
+  );
+
+  const clearRoomServerThemeDefault = useCallback(
+    async (roomId: string) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      await client.sendStateEvent(roomId, THEME_DEFAULT_EVENT as any, {}, '');
+    },
+    [client],
+  );
+
+  const setSpaceServerThemeDefault = useCallback(
+    async (spaceId: string, themeId: string, options?: { applyToNewUsers?: boolean }) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      const content: Record<string, unknown> = {
+        themeId,
+        applyToNewUsers: options?.applyToNewUsers !== false,
+        updatedAt: Date.now(),
+      };
+      const userId = client.getUserId();
+      if (userId) {
+        content.updatedBy = userId;
+      }
+      await client.sendStateEvent(spaceId, THEME_DEFAULT_EVENT as any, content, '');
+    },
+    [client],
+  );
+
+  const clearSpaceServerThemeDefault = useCallback(
+    async (spaceId: string) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      await client.sendStateEvent(spaceId, THEME_DEFAULT_EVENT as any, {}, '');
+    },
+    [client],
+  );
+
+  const upsertThemeDefinition = useCallback(
+    async (targetRoomId: string, themeId: string, theme: Theme, options?: { description?: string }) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      const payload: Record<string, unknown> = JSON.parse(JSON.stringify(theme));
+      payload.name = themeId;
+      if (!payload.displayName || typeof payload.displayName !== 'string') {
+        payload.displayName = theme.displayName || themeId;
+      }
+      if (options?.description) {
+        payload.description = options.description;
+      }
+      payload.updatedAt = Date.now();
+      const userId = client.getUserId();
+      if (userId) {
+        payload.updatedBy = userId;
+      }
+      await client.sendStateEvent(targetRoomId, THEME_DEFINITION_EVENT as any, payload, themeId);
+    },
+    [client],
+  );
+
+  const deleteThemeDefinition = useCallback(
+    async (targetRoomId: string, themeId: string) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      await client.sendStateEvent(targetRoomId, THEME_DEFINITION_EVENT as any, {}, themeId);
+    },
+    [client],
+  );
+
+  const acceptInvite = useCallback(
+    async (roomId: string) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      await client.joinRoom(roomId);
+      // The room list will auto-update via the RoomEvent.Timeline listener
+    },
+    [client],
+  );
+
+  const declineInvite = useCallback(
+    async (roomId: string) => {
+      if (!client) {
+        throw new Error('Matrix client is not initialised');
+      }
+      await client.leave(roomId);
+      // The room list will auto-update via the RoomEvent.Timeline listener
+    },
+    [client],
+  );
+
   const value: MatrixContextType = {
     client,
     isLoggedIn,
@@ -875,6 +1098,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCurrentRoom,
     rooms,
     spaces,
+    invites,
     sendMessage,
     sendReaction,
     deleteMessage,
@@ -886,6 +1110,17 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     cancelVerification,
     startVerification,
     isLoading,
+    roomThemeDefaults,
+    spaceThemeDefaults,
+    themeDefinitions,
+    setRoomServerThemeDefault,
+    clearRoomServerThemeDefault,
+    setSpaceServerThemeDefault,
+    clearSpaceServerThemeDefault,
+    upsertThemeDefinition,
+    deleteThemeDefinition,
+    acceptInvite,
+    declineInvite,
   };
 
   return <MatrixContext.Provider value={value}>{children}</MatrixContext.Provider>;

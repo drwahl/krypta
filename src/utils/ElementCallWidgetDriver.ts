@@ -10,6 +10,9 @@ import {
   OpenIDRequestState,
 } from 'matrix-widget-api';
 import type { MatrixClient, MatrixEvent, Room } from 'matrix-js-sdk';
+import type { SendDelayedEventRequestOpts } from 'matrix-js-sdk/lib/@types/requests';
+import { UpdateDelayedEventAction } from 'matrix-js-sdk/lib/@types/requests';
+import { UnsupportedDelayedEventsEndpointError } from 'matrix-js-sdk/lib/errors';
 
 interface TurnServerCredentials {
   uris: string[];
@@ -85,6 +88,21 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     return this.sendMatrixEvent(eventType, content, stateKey, roomId);
   }
 
+  private buildDelayOpts(delay: number | null, parentDelayId: string | null): SendDelayedEventRequestOpts {
+    if (delay === null && parentDelayId === null) {
+      throw new Error('Must provide at least one of delay or parentDelayId');
+    }
+
+    const opts: Record<string, unknown> = {};
+    if (delay !== null) {
+      opts.delay = delay;
+    }
+    if (parentDelayId !== null) {
+      opts.parent_delay_id = parentDelayId;
+    }
+    return opts as SendDelayedEventRequestOpts;
+  }
+
   public override async sendDelayedEvent(
     delay: number | null,
     parentDelayId: string | null,
@@ -93,23 +111,56 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     stateKey: string | null = null,
     roomId: string | null = null,
   ): Promise<ISendDelayedEventDetails> {
-    // NyChatt does not currently queue delayed events, so send immediately.
-    const { roomId: targetRoomId, eventId } = await this.sendMatrixEvent(eventType, content, stateKey, roomId);
-    const delayId = `immediate-${eventId || Date.now().toString(36)}`;
-    return { roomId: targetRoomId, delayId };
+    const targetRoomId = roomId ?? this.room.roomId;
+    const delayOpts = this.buildDelayOpts(delay, parentDelayId);
+
+    try {
+      let response;
+      if (stateKey !== null) {
+        response = await (this.client as any)._unstable_sendDelayedStateEvent(
+          targetRoomId,
+          delayOpts,
+          eventType,
+          content,
+          stateKey,
+        );
+      } else {
+        response = await (this.client as any)._unstable_sendDelayedEvent(
+          targetRoomId,
+          delayOpts,
+          null,
+          eventType,
+          content,
+        );
+      }
+
+      return {
+        roomId: targetRoomId,
+        delayId: String(response.delay_id),
+      };
+    } catch (error) {
+      if (error instanceof UnsupportedDelayedEventsEndpointError) {
+        throw error;
+      }
+      console.error('[ElementCallWidgetDriver] Failed to send delayed event', error);
+      throw error;
+    }
   }
 
-  public override cancelScheduledDelayedEvent(_delayId: string): Promise<void> {
-    // No-op (we send events immediately).
-    return Promise.resolve();
+  public override async updateDelayedEvent(delayId: string, action: UpdateDelayedEventAction): Promise<void> {
+    await (this.client as any)._unstable_updateDelayedEvent(delayId, action);
   }
 
-  public override restartScheduledDelayedEvent(_delayId: string): Promise<void> {
-    return Promise.resolve();
+  public override async cancelScheduledDelayedEvent(delayId: string): Promise<void> {
+    await (this.client as any)._unstable_cancelScheduledDelayedEvent(delayId);
   }
 
-  public override sendScheduledDelayedEvent(_delayId: string): Promise<void> {
-    return Promise.resolve();
+  public override async restartScheduledDelayedEvent(delayId: string): Promise<void> {
+    await (this.client as any)._unstable_restartScheduledDelayedEvent(delayId);
+  }
+
+  public override async sendScheduledDelayedEvent(delayId: string): Promise<void> {
+    await (this.client as any)._unstable_sendScheduledDelayedEvent(delayId);
   }
 
   public override async sendToDevice(

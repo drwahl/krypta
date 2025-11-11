@@ -266,8 +266,8 @@ const ChatApp: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
-      <ThemeProvider>
-        <MatrixProvider>
+      <MatrixProvider>
+        <ThemeProvider>
           <NotificationProvider>
             <MultiRoomProvider>
               <ThreadsProvider>
@@ -275,8 +275,8 @@ const App: React.FC = () => {
               </ThreadsProvider>
             </MultiRoomProvider>
           </NotificationProvider>
-        </MatrixProvider>
-      </ThemeProvider>
+        </ThemeProvider>
+      </MatrixProvider>
     </ErrorBoundary>
   );
 };
