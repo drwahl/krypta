@@ -1,11 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useMultiRoom } from '../contexts/MultiRoomContext';
-import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock } from 'lucide-react';
+import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical } from 'lucide-react';
 import { Room } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import ThemeSelector from './ThemeSelector';
+import SortSelector, { SortMode } from './SortSelector';
 
 const RoomList: React.FC = () => {
   const { rooms, spaces, logout, client } = useMatrix();
@@ -14,6 +15,39 @@ const RoomList: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(true);
+  
+  // Sort mode
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    return (localStorage.getItem('room_sort_mode') as SortMode) || 'activity';
+  });
+  
+  // Custom order storage
+  const [customSpaceOrder, setCustomSpaceOrder] = useState<string[]>(() => {
+    const stored = localStorage.getItem('custom_space_order');
+    return stored ? JSON.parse(stored) : [];
+  });
+  
+  const [customRoomOrder, setCustomRoomOrder] = useState<Record<string, string[]>>(() => {
+    const stored = localStorage.getItem('custom_room_order');
+    return stored ? JSON.parse(stored) : {};
+  });
+  
+  // Drag-and-drop state
+  const [draggedItem, setDraggedItem] = useState<{ type: 'space' | 'room'; id: string; spaceId?: string } | null>(null);
+  
+  // Persist sort mode
+  useEffect(() => {
+    localStorage.setItem('room_sort_mode', sortMode);
+  }, [sortMode]);
+  
+  // Persist custom orders
+  useEffect(() => {
+    localStorage.setItem('custom_space_order', JSON.stringify(customSpaceOrder));
+  }, [customSpaceOrder]);
+  
+  useEffect(() => {
+    localStorage.setItem('custom_room_order', JSON.stringify(customRoomOrder));
+  }, [customRoomOrder]);
 
   const toggleSpace = (spaceId: string) => {
     const newExpanded = new Set(expandedSpaces);
@@ -23,6 +57,61 @@ const RoomList: React.FC = () => {
       newExpanded.add(spaceId);
     }
     setExpandedSpaces(newExpanded);
+  };
+
+  // Helper function for activity-based sorting
+  const sortRoomsByActivity = (roomList: Room[]) => {
+    return [...roomList].sort((a, b) => {
+      const aTimeline = a.timeline;
+      const bTimeline = b.timeline;
+      const aLastTs = aTimeline.length > 0 ? aTimeline[aTimeline.length - 1].getTs() : 0;
+      const bLastTs = bTimeline.length > 0 ? bTimeline[bTimeline.length - 1].getTs() : 0;
+      return bLastTs - aLastTs;
+    });
+  };
+
+  // Sorting functions
+  const sortSpaces = (spaceList: Room[]): Room[] => {
+    if (sortMode === 'activity') {
+      return sortRoomsByActivity(spaceList);
+    } else if (sortMode === 'alphabetical') {
+      return [...spaceList].sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortMode === 'custom') {
+      const ordered = [...spaceList].sort((a, b) => {
+        const aIndex = customSpaceOrder.indexOf(a.roomId);
+        const bIndex = customSpaceOrder.indexOf(b.roomId);
+        
+        // If neither is in custom order, sort alphabetically
+        if (aIndex === -1 && bIndex === -1) return a.name.localeCompare(b.name);
+        // If one is in custom order and one isn't, prioritize the custom one
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        // Both are in custom order, sort by position
+        return aIndex - bIndex;
+      });
+      return ordered;
+    }
+    return spaceList;
+  };
+  
+  const sortRoomsInSpace = (roomList: Room[], spaceId?: string): Room[] => {
+    if (sortMode === 'activity') {
+      return sortRoomsByActivity(roomList);
+    } else if (sortMode === 'alphabetical') {
+      return [...roomList].sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortMode === 'custom' && spaceId) {
+      const customOrder = customRoomOrder[spaceId] || [];
+      return [...roomList].sort((a, b) => {
+        const aIndex = customOrder.indexOf(a.roomId);
+        const bIndex = customOrder.indexOf(b.roomId);
+        
+        if (aIndex === -1 && bIndex === -1) return a.name.localeCompare(b.name);
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+    }
+    return roomList;
   };
 
   // Organize rooms by space
@@ -54,15 +143,15 @@ const RoomList: React.FC = () => {
     // Rooms not in any space
     const orphanRooms = rooms.filter(room => !roomsInAnySpace.has(room.roomId));
 
-    // Sort spaces by name
-    const sortedSpacesList = [...spaces].sort((a, b) => a.name.localeCompare(b.name));
+    // Sort spaces based on current sort mode
+    const sortedSpacesList = sortSpaces(spaces);
 
     return {
       roomsInSpaces: spaceToRooms,
       roomsWithoutSpace: orphanRooms,
       sortedSpaces: sortedSpacesList
     };
-  }, [rooms, spaces]);
+  }, [rooms, spaces, sortMode, customSpaceOrder, customRoomOrder]);
 
   // Filter rooms based on search
   const filterRooms = (roomList: Room[]) => {
@@ -75,16 +164,6 @@ const RoomList: React.FC = () => {
     });
   };
 
-  const sortRoomsByActivity = (roomList: Room[]) => {
-    return [...roomList].sort((a, b) => {
-      const aTimeline = a.timeline;
-      const bTimeline = b.timeline;
-      const aLastTs = aTimeline.length > 0 ? aTimeline[aTimeline.length - 1].getTs() : 0;
-      const bLastTs = bTimeline.length > 0 ? bTimeline[bTimeline.length - 1].getTs() : 0;
-      return bLastTs - aLastTs;
-    });
-  };
-
   const getUnreadCount = (room: Room) => {
     const notificationCount = room.getUnreadNotificationCount();
     return notificationCount > 0 ? notificationCount : null;
@@ -93,11 +172,86 @@ const RoomList: React.FC = () => {
   const getUserDisplayName = () => {
     return client?.getUserId() || 'User';
   };
+  
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, type: 'space' | 'room', id: string, spaceId?: string) => {
+    if (sortMode !== 'custom') return;
+    
+    setDraggedItem({ type, id, spaceId });
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  
+  const handleDragOver = (e: React.DragEvent) => {
+    if (sortMode !== 'custom') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+  
+  const handleDrop = (e: React.DragEvent, targetType: 'space' | 'room', targetId: string, targetSpaceId?: string) => {
+    e.preventDefault();
+    if (sortMode !== 'custom' || !draggedItem) return;
+    
+    // Dropping a space
+    if (draggedItem.type === 'space' && targetType === 'space') {
+      const currentOrder = customSpaceOrder.length > 0 ? customSpaceOrder : spaces.map(s => s.roomId);
+      const draggedIndex = currentOrder.indexOf(draggedItem.id);
+      const targetIndex = currentOrder.indexOf(targetId);
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const newOrder = [...currentOrder];
+        newOrder.splice(draggedIndex, 1);
+        newOrder.splice(targetIndex, 0, draggedItem.id);
+        setCustomSpaceOrder(newOrder);
+      }
+    }
+    
+    // Dropping a room within the same space
+    if (draggedItem.type === 'room' && targetType === 'room' && draggedItem.spaceId === targetSpaceId && targetSpaceId) {
+      const spaceRooms = roomsInSpaces.get(targetSpaceId) || [];
+      const currentOrder = customRoomOrder[targetSpaceId] || spaceRooms.map(r => r.roomId);
+      const draggedIndex = currentOrder.indexOf(draggedItem.id);
+      const targetIndex = currentOrder.indexOf(targetId);
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const newOrder = [...currentOrder];
+        newOrder.splice(draggedIndex, 1);
+        newOrder.splice(targetIndex, 0, draggedItem.id);
+        setCustomRoomOrder({
+          ...customRoomOrder,
+          [targetSpaceId]: newOrder
+        });
+      }
+    }
+    
+    // Dropping orphan room
+    if (draggedItem.type === 'room' && targetType === 'room' && !draggedItem.spaceId && !targetSpaceId) {
+      const currentOrder = customRoomOrder['orphan'] || roomsWithoutSpace.map(r => r.roomId);
+      const draggedIndex = currentOrder.indexOf(draggedItem.id);
+      const targetIndex = currentOrder.indexOf(targetId);
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const newOrder = [...currentOrder];
+        newOrder.splice(draggedIndex, 1);
+        newOrder.splice(targetIndex, 0, draggedItem.id);
+        setCustomRoomOrder({
+          ...customRoomOrder,
+          'orphan': newOrder
+        });
+      }
+    }
+    
+    setDraggedItem(null);
+  };
+  
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+  };
 
-  const RoomItem: React.FC<{ room: Room; indent?: boolean }> = ({ room, indent = false }) => {
+  const RoomItem: React.FC<{ room: Room; indent?: boolean; spaceId?: string }> = ({ room, indent = false, spaceId }) => {
     const isOpen = openRooms.some(r => r.roomId === room.roomId);
     const isActive = activeRoomId === room.roomId;
     const unreadCount = getUnreadCount(room);
+    const isDragging = draggedItem?.type === 'room' && draggedItem.id === room.roomId;
     const members = room.getJoinedMemberCount();
     const isEncrypted = room.hasEncryptionStateEvent();
     const avatarUrl = getRoomAvatarUrl(room, client, 32);
@@ -110,6 +264,11 @@ const RoomList: React.FC = () => {
     return (
       <button
         onClick={() => addRoom(room)}
+        draggable={sortMode === 'custom'}
+        onDragStart={(e) => handleDragStart(e, 'room', room.roomId, spaceId)}
+        onDragOver={handleDragOver}
+        onDrop={(e) => handleDrop(e, 'room', room.roomId, spaceId)}
+        onDragEnd={handleDragEnd}
         className={`w-full flex items-center transition ${
           isActive ? 'border-l-2' : ''
         } ${indent ? 'pl-8' : ''}`}
@@ -120,6 +279,8 @@ const RoomList: React.FC = () => {
           borderLeftColor: isActive ? 'var(--color-primary)' : (isOpen ? 'var(--color-accent)' : 'transparent'),
           borderRadius: 'var(--sizing-borderRadius)',
           fontSize: 'var(--sizing-textBase)',
+          opacity: isDragging ? 0.5 : 1,
+          cursor: sortMode === 'custom' ? 'grab' : 'pointer',
         }}
         onMouseEnter={(e) => {
           if (!isActive) {
@@ -132,6 +293,18 @@ const RoomList: React.FC = () => {
           }
         }}
       >
+        {/* Drag handle for custom sort mode */}
+        {sortMode === 'custom' && (
+          <GripVertical 
+            className="flex-shrink-0" 
+            style={{ 
+              width: '1rem', 
+              height: '1rem', 
+              color: 'var(--color-textMuted)' 
+            }} 
+          />
+        )}
+        
         {/* Room Avatar or Initials - Hide in compact mode */}
         {!theme.style.compactMode && (
           <>
@@ -373,8 +546,8 @@ const RoomList: React.FC = () => {
                     </button>
                   {isOrphanRoomsExpanded && (
                     <div>
-                      {sortRoomsByActivity(filteredOrphanRooms).map((room) => (
-                        <RoomItem key={room.roomId} room={room} indent={true} />
+                      {sortRoomsInSpace(filteredOrphanRooms, 'orphan').map((room) => (
+                        <RoomItem key={room.roomId} room={room} indent={true} spaceId={undefined} />
                       ))}
                     </div>
                   )}
@@ -388,6 +561,7 @@ const RoomList: React.FC = () => {
               const filteredSpaceRooms = filterRooms(spaceRooms);
               const isExpanded = expandedSpaces.has(space.roomId);
               const totalUnread = spaceRooms.reduce((sum, room) => sum + (getUnreadCount(room) || 0), 0);
+              const isDraggingSpace = draggedItem?.type === 'space' && draggedItem.id === space.roomId;
 
               // Hide space if no rooms match search
               if (searchQuery && filteredSpaceRooms.length === 0) {
@@ -399,8 +573,29 @@ const RoomList: React.FC = () => {
                   {/* Space header */}
                   <button
                     onClick={() => toggleSpace(space.roomId)}
+                    draggable={sortMode === 'custom'}
+                    onDragStart={(e) => handleDragStart(e, 'space', space.roomId)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, 'space', space.roomId)}
+                    onDragEnd={handleDragEnd}
                     className="w-full px-4 py-2 flex items-center gap-2 hover:bg-slate-700/30 transition group"
+                    style={{
+                      opacity: isDraggingSpace ? 0.5 : 1,
+                      cursor: sortMode === 'custom' ? 'grab' : 'pointer',
+                    }}
                   >
+                    {/* Drag handle for custom sort mode */}
+                    {sortMode === 'custom' && (
+                      <GripVertical 
+                        className="flex-shrink-0" 
+                        style={{ 
+                          width: '1rem', 
+                          height: '1rem', 
+                          color: 'var(--color-textMuted)' 
+                        }} 
+                      />
+                    )}
+                    
                     {isExpanded ? (
                       <ChevronDown className="w-4 h-4 text-slate-400" />
                     ) : (
@@ -437,8 +632,8 @@ const RoomList: React.FC = () => {
                   {/* Space rooms (when expanded) */}
                   {isExpanded && (
                     <div>
-                      {sortRoomsByActivity(filteredSpaceRooms).map((room) => (
-                        <RoomItem key={room.roomId} room={room} indent={true} />
+                      {sortRoomsInSpace(filteredSpaceRooms, space.roomId).map((room) => (
+                        <RoomItem key={room.roomId} room={room} indent={true} spaceId={space.roomId} />
                       ))}
                     </div>
                   )}
@@ -449,9 +644,14 @@ const RoomList: React.FC = () => {
         )}
       </div>
 
-      {/* Theme Selector - Footer */}
-      <div className="border-t border-slate-700 p-3 flex-shrink-0 mt-auto" style={{ backgroundColor: 'var(--color-bgSecondary)' }}>
-        <ThemeSelector />
+      {/* Sort and Theme Selector - Footer */}
+      <div className="border-t border-slate-700 flex-shrink-0 mt-auto" style={{ backgroundColor: 'var(--color-bgSecondary)' }}>
+        <div style={{ padding: 'var(--spacing-sidebarPadding)', borderBottom: '1px solid var(--color-border)' }}>
+          <SortSelector currentSort={sortMode} onSortChange={setSortMode} />
+        </div>
+        <div style={{ padding: 'var(--spacing-sidebarPadding)' }}>
+          <ThemeSelector />
+        </div>
       </div>
     </div>
   );

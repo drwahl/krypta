@@ -3,12 +3,107 @@ import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
-import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X } from 'lucide-react';
-import { MatrixEvent, Room } from 'matrix-js-sdk';
+import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin } from 'lucide-react';
+import { MatrixEvent, Room, MatrixClient } from 'matrix-js-sdk';
+import UrlPreview from './UrlPreview';
 
 interface MessageTimelineProps {
   room?: Room; // Optional room prop for multi-pane support
 }
+
+// Media renderer component - defined outside to prevent recreation on every render
+const MediaRenderer = React.memo<{ content: any; client: MatrixClient }>(({ content, client }) => {
+  const msgtype = content.msgtype;
+  const mxcUrl = content.url;
+  
+  if (!mxcUrl || !client) return null;
+  
+  const httpUrl = client.mxcUrlToHttp(mxcUrl);
+  if (!httpUrl) return null;
+  
+  const accessToken = client.getAccessToken();
+  const authenticatedUrl = `${httpUrl}${httpUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`;
+  
+  const filename = content.body || 'file';
+  const filesize = content.info?.size;
+  
+  // Images
+  if (msgtype === 'm.image') {
+    const width = content.info?.w;
+    const thumbnailUrl = content.info?.thumbnail_url 
+      ? client.mxcUrlToHttp(content.info.thumbnail_url)
+      : null;
+    const authenticatedThumbnailUrl = thumbnailUrl 
+      ? `${thumbnailUrl}${thumbnailUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`
+      : null;
+    
+    const displayUrl = authenticatedThumbnailUrl || authenticatedUrl;
+    
+    return (
+      <div className="mt-2">
+        <a href={authenticatedUrl} target="_blank" rel="noopener noreferrer">
+          <img
+            src={displayUrl}
+            alt={filename}
+            className="max-w-sm max-h-96 rounded-lg cursor-pointer hover:opacity-90 transition"
+            style={{ maxWidth: width && width < 400 ? width : undefined }}
+            loading="lazy"
+          />
+        </a>
+        {filename && (
+          <div className="text-xs text-slate-400 mt-1">{filename}</div>
+        )}
+      </div>
+    );
+  }
+  
+  // Videos
+  if (msgtype === 'm.video') {
+    return (
+      <div className="mt-2">
+        <video
+          src={authenticatedUrl}
+          controls
+          className="max-w-sm max-h-96 rounded-lg"
+          preload="metadata"
+        >
+          Your browser doesn't support video playback.
+        </video>
+        {filename && (
+          <div className="text-xs text-slate-400 mt-1">{filename}</div>
+        )}
+      </div>
+    );
+  }
+  
+  // Files
+  if (msgtype === 'm.file') {
+    const filesizeStr = filesize ? `(${(filesize / 1024).toFixed(1)} KB)` : '';
+    
+    return (
+      <div className="mt-2">
+        <a
+          href={authenticatedUrl}
+          download={filename}
+          className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm"
+        >
+          <Upload className="w-4 h-4" />
+          <span>{filename}</span>
+          {filesizeStr && <span className="text-xs text-slate-400">{filesizeStr}</span>}
+        </a>
+      </div>
+    );
+  }
+  
+  return null;
+});
+
+// Helper function to extract URLs from text
+const extractUrls = (text: string): string[] => {
+  const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
+  const matches = text.match(urlRegex);
+  return matches || [];
+};
 
 const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => {
   const { currentRoom: contextRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
@@ -17,7 +112,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   // Use prop if provided, otherwise fall back to context
   const currentRoom = roomProp || contextRoom;
   const [messages, setMessages] = useState<MatrixEvent[]>([]);
-  const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(true);
   const [reactionUpdate, setReactionUpdate] = useState(0); // Force re-render for reactions
@@ -510,93 +604,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     loadCustomEmojis();
   }, [client, fetchAuthenticatedMedia]);
 
-  // Media renderer component - uses direct authenticated URLs for better performance
-  const MediaRenderer: React.FC<{ content: any }> = React.memo(({ content }) => {
-    const msgtype = content.msgtype;
-    const mxcUrl = content.url;
-    
-    if (!mxcUrl || !client) return null;
-    
-    const httpUrl = client.mxcUrlToHttp(mxcUrl);
-    if (!httpUrl) return null;
-    
-    const accessToken = client.getAccessToken();
-    const authenticatedUrl = `${httpUrl}${httpUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`;
-    
-    const filename = content.body || 'file';
-    const filesize = content.info?.size;
-    
-    // Images
-    if (msgtype === 'm.image') {
-      const width = content.info?.w;
-      const thumbnailUrl = content.info?.thumbnail_url 
-        ? client.mxcUrlToHttp(content.info.thumbnail_url)
-        : null;
-      const authenticatedThumbnailUrl = thumbnailUrl 
-        ? `${thumbnailUrl}${thumbnailUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken || '')}`
-        : null;
-      
-      const displayUrl = authenticatedThumbnailUrl || authenticatedUrl;
-      
-      return (
-        <div className="mt-2">
-          <a href={authenticatedUrl} target="_blank" rel="noopener noreferrer">
-            <img
-              src={displayUrl}
-              alt={filename}
-              className="max-w-sm max-h-96 rounded-lg cursor-pointer hover:opacity-90 transition"
-              style={{ maxWidth: width && width < 400 ? width : undefined }}
-              loading="lazy"
-            />
-          </a>
-          {filename && (
-            <div className="text-xs text-slate-400 mt-1">{filename}</div>
-          )}
-        </div>
-      );
-    }
-    
-    // Videos
-    if (msgtype === 'm.video') {
-      return (
-        <div className="mt-2">
-          <video
-            src={authenticatedUrl}
-            controls
-            className="max-w-sm max-h-96 rounded-lg"
-            preload="metadata"
-          >
-            Your browser doesn't support video playback.
-          </video>
-          {filename && (
-            <div className="text-xs text-slate-400 mt-1">{filename}</div>
-          )}
-        </div>
-      );
-    }
-    
-    // Files
-    if (msgtype === 'm.file') {
-      const filesizeStr = filesize ? `(${(filesize / 1024).toFixed(1)} KB)` : '';
-      
-      return (
-        <div className="mt-2">
-          <a
-            href={authenticatedUrl}
-            download={filename}
-            className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm"
-          >
-            <Upload className="w-4 h-4" />
-            <span>{filename}</span>
-            {filesizeStr && <span className="text-xs text-slate-400">{filesizeStr}</span>}
-          </a>
-        </div>
-      );
-    }
-    
-    return null;
-  });
-
   // Handle custom emoji upload
   const handleEmojiUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -938,6 +945,34 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     }
   };
 
+  const handlePinMessage = async (eventId: string) => {
+    if (!currentRoom || !client) return;
+    
+    try {
+      // Get current pinned events
+      const pinnedEvent = currentRoom.currentState.getStateEvents('m.room.pinned_events', '');
+      const currentPinned = pinnedEvent?.getContent()?.pinned || [];
+      
+      // Check if already pinned
+      if (currentPinned.includes(eventId)) {
+        alert('This message is already pinned');
+        return;
+      }
+      
+      // Add to pinned
+      const newPinned = [...currentPinned, eventId];
+      
+      await client.sendStateEvent(currentRoom.roomId, 'm.room.pinned_events', {
+        pinned: newPinned,
+      }, '');
+      
+      console.log('✅ Message pinned successfully');
+    } catch (error: any) {
+      console.error('Failed to pin message:', error);
+      alert(`Failed to pin message: ${error.message || error}`);
+    }
+  };
+
   const getReactions = (event: MatrixEvent) => {
     if (!currentRoom) return {};
     
@@ -1124,8 +1159,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                 <div
                   key={eventId}
                   className="group"
-                  onMouseEnter={() => setHoveredMessage(eventId)}
-                  onMouseLeave={() => setHoveredMessage(null)}
                   style={{
                     padding: 'var(--spacing-messagePadding)',
                     marginBottom: 'var(--spacing-messageGap)',
@@ -1162,7 +1195,13 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                         {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video')) && (
                           <span>{renderMessageWithMentions(content.body || '')}</span>
                         )}
-                        <MediaRenderer content={content} />
+                        {client && <MediaRenderer content={content} client={client} />}
+                        
+                        {/* URL Previews */}
+                        {content.body && content.msgtype === 'm.text' && extractUrls(content.body).map((url, idx) => (
+                          <UrlPreview key={`${eventId}-url-${idx}`} url={url} />
+                        ))}
+                        
                         {isEncrypted && (
                           <span style={{ color: 'var(--color-success)', marginLeft: '0.5rem' }}>
                             [encrypted]
@@ -1216,17 +1255,18 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                     </div>
                   )}
                   
-                  {/* Compact actions on hover - use fixed width container to prevent bounce */}
-                  <div style={{ 
-                    display: 'flex', 
-                    gap: '0.25rem', 
-                    marginLeft: '0.5rem',
-                    flexShrink: 0,
-                    minWidth: isOwn ? '3rem' : '1.5rem', // Reserve space to prevent layout shift
-                    justifyContent: 'flex-end',
-                  }}>
-                    {hoveredMessage === eventId && (
-                      <>
+                  {/* Compact actions on hover - always rendered but hidden with CSS */}
+                  <div 
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ 
+                      display: 'flex', 
+                      gap: '0.25rem', 
+                      marginLeft: '0.5rem',
+                      flexShrink: 0,
+                      minWidth: isOwn ? '3rem' : '1.5rem', // Reserve space to prevent layout shift
+                      justifyContent: 'flex-end',
+                    }}
+                  >
                         <button
                           onClick={() => {
                             if (showEmojiPicker === eventId) {
@@ -1248,6 +1288,20 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                         >
                           +
                         </button>
+                        <button
+                          onClick={() => handlePinMessage(eventId)}
+                          style={{
+                            backgroundColor: 'var(--color-bgTertiary)',
+                            color: 'var(--color-text)',
+                            padding: '0.125rem 0.25rem',
+                            fontSize: 'var(--sizing-textXs)',
+                            border: '1px solid var(--color-border)',
+                            cursor: 'pointer',
+                          }}
+                          title="Pin message"
+                        >
+                          📌
+                        </button>
                         {isOwn && (
                           <button
                             onClick={() => handleDeleteMessage(eventId)}
@@ -1264,8 +1318,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                             x
                           </button>
                         )}
-                      </>
-                    )}
                   </div>
                   
                   {/* Emoji picker for terminal mode (same as bubble mode but positioned differently) */}
@@ -1422,8 +1474,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
               <div
                 key={eventId}
                 className="group"
-                onMouseEnter={() => setHoveredMessage(eventId)}
-                onMouseLeave={() => setHoveredMessage(null)}
               >
                 <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-2xl ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
@@ -1467,7 +1517,12 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                             )}
                             
                             {/* Media content (images, videos, files) */}
-                            <MediaRenderer content={content} />
+                            {client && <MediaRenderer content={content} client={client} />}
+                            
+                            {/* URL Previews */}
+                            {content.body && content.msgtype === 'm.text' && extractUrls(content.body).map((url, idx) => (
+                              <UrlPreview key={`${eventId}-url-${idx}`} url={url} />
+                            ))}
                             
                             {isEncrypted && (
                               <div className="flex items-center gap-1 mt-1 text-xs opacity-50">
@@ -1479,10 +1534,9 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                         )}
                       </div>
 
-                      {/* Message actions (reaction, delete) */}
-                      {hoveredMessage === eventId && (
-                        <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 transition flex gap-1">
-                          <button
+                      {/* Message actions (reaction, delete) - always rendered but hidden with CSS */}
+                      <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 transition flex gap-1">
+                        <button
                             onClick={() => {
                               if (showEmojiPicker === eventId) {
                                 setShowEmojiPicker(null);
@@ -1497,6 +1551,15 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                             <Smile className="w-4 h-4" />
                           </button>
                           
+                          {/* Pin button */}
+                          <button
+                            onClick={() => handlePinMessage(eventId)}
+                            className="bg-slate-700 hover:bg-slate-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
+                            title="Pin message"
+                          >
+                            <Pin className="w-4 h-4" />
+                          </button>
+                          
                           {/* Delete button - only for own messages */}
                           {isOwn && (
                             <button
@@ -1507,8 +1570,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
-                        </div>
-                      )}
+                      </div>
                       
                       {/* Emoji picker dropdown */}
                       {showEmojiPicker === eventId && (
