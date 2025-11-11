@@ -227,14 +227,13 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   
   // Element Call integration via hook
   const {
-    isElementCallRoom: hasElementCall,
-    showCallFrame,
+    isCallRoom: hasElementCall,
     callUrl,
-    isLoading: isJoiningCall,
-    iframeRef: callIframeRef,
-    joinCall: joinElementCall,
-    leaveCall: leaveElementCall,
+    callIframeRef,
   } = useElementCall(currentRoom, client);
+  
+  // Track if we're showing the call iframe
+  const [showCallFrame, setShowCallFrame] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesStartRef = useRef<HTMLDivElement>(null);
 
@@ -965,9 +964,9 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
           </div>
           
           {/* Join Call button */}
-          {hasElementCall && (
+          {hasElementCall && !showCallFrame && (
             <button
-              onClick={joinElementCall}
+              onClick={() => setShowCallFrame(true)}
               className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2 font-medium"
               title="Join video call"
             >
@@ -982,7 +981,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       {showCallFrame && callUrl && (
         <div className="relative bg-slate-900 border-b border-slate-700" style={{ height: '600px' }}>
           <button
-            onClick={leaveElementCall}
+            onClick={() => setShowCallFrame(false)}
             className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition font-medium shadow-lg flex items-center gap-2"
             title="Leave call"
           >
