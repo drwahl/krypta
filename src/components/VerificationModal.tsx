@@ -12,14 +12,34 @@ const VerificationModal: React.FC = () => {
     if (!verificationRequest) return;
 
     let v: any = null;
+    let mounted = true;
 
     const handleVerification = async () => {
       try {
         console.log('🔐 Verification request received');
         console.log('Request phase:', verificationRequest.phase);
         console.log('Request methods:', verificationRequest.methods);
+        console.log('Request initiatedByMe:', verificationRequest.initiatedByMe);
         
-        // Check if there's already a verifier (Element started it)
+        // If we initiated this request, we need to wait for the other side to accept
+        if (verificationRequest.initiatedByMe && verificationRequest.phase < 2) {
+          console.log('⏳ Waiting for other device to accept...');
+          
+          // Listen for phase changes
+          const onPhaseChange = () => {
+            if (!mounted) return;
+            console.log('Phase changed to:', verificationRequest.phase);
+            if (verificationRequest.phase >= 2) {
+              // They accepted, now we can proceed
+              handleVerification();
+            }
+          };
+          
+          verificationRequest.on('change', onPhaseChange);
+          return; // Exit and wait for phase change
+        }
+        
+        // Check if there's already a verifier (Element started it or they accepted our request)
         v = verificationRequest.verifier;
         
         if (!v) {
@@ -38,12 +58,15 @@ const VerificationModal: React.FC = () => {
           console.log('🔐 Using existing verifier from request');
         }
         
+        if (!mounted) return;
+        
         console.log('Verifier:', v);
         console.log('Verifier methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(v)));
         setVerifier(v);
 
         // Listen for SAS emojis BEFORE starting verification
         v.on('show_sas', (e: any) => {
+          if (!mounted) return;
           console.log('🔐 SAS emojis received:', e.sas.emoji);
           setSasEmojis(e.sas.emoji || []);
           setStep('showing_sas');
@@ -56,6 +79,7 @@ const VerificationModal: React.FC = () => {
 
         // Listen for cancel events
         v.on('cancel', () => {
+          if (!mounted) return;
           console.log('🔐 Verification cancelled');
           cancelVerification();
         });
@@ -65,6 +89,7 @@ const VerificationModal: React.FC = () => {
         await v.verify();
         console.log('✅ Verification in progress, waiting for emojis...');
       } catch (error) {
+        if (!mounted) return;
         console.error('❌ Verification error:', error);
         console.error('Error type:', typeof error);
         console.error('Error constructor:', error?.constructor?.name);
@@ -75,6 +100,7 @@ const VerificationModal: React.FC = () => {
 
     // Cleanup function
     return () => {
+      mounted = false;
       if (v && typeof v.removeAllListeners === 'function') {
         v.removeAllListeners();
       }
@@ -151,7 +177,16 @@ const VerificationModal: React.FC = () => {
         {step === 'pending' && (
           <div className="text-center py-8">
             <div className="animate-spin w-12 h-12 border-4 border-green-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-slate-300">Starting verification...</p>
+            <p className="text-slate-300">
+              {verificationRequest.initiatedByMe && verificationRequest.phase < 2
+                ? 'Waiting for other device to accept...'
+                : 'Starting verification...'}
+            </p>
+            {verificationRequest.initiatedByMe && verificationRequest.phase < 2 && (
+              <p className="text-slate-400 text-sm mt-2">
+                Check Element and click "Verify Session" or "Accept"
+              </p>
+            )}
           </div>
         )}
 
