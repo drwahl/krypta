@@ -11,64 +11,122 @@ const VerificationModal: React.FC = () => {
   useEffect(() => {
     if (!verificationRequest) return;
 
-    const handleAccept = async () => {
+    let v: any = null;
+
+    const handleVerification = async () => {
       try {
-        console.log('🔐 Accepting verification request...');
-        console.log('Request object:', verificationRequest);
+        console.log('🔐 Verification request received');
+        console.log('Request phase:', verificationRequest.phase);
+        console.log('Request methods:', verificationRequest.methods);
         
-        // Accept the verification request first
-        await verificationRequest.accept();
-        console.log('✅ Verification request accepted');
+        // Check if there's already a verifier (Element started it)
+        v = verificationRequest.verifier;
         
-        // Get the verifier from the request
-        const v = verificationRequest.verifier;
         if (!v) {
-          console.error('❌ No verifier available');
-          return;
+          // We need to accept and start the verification
+          console.log('🔐 Accepting verification request...');
+          await verificationRequest.accept();
+          console.log('✅ Verification request accepted');
+          
+          // Wait a moment for the request to transition
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+          // Start the verification with SAS method
+          console.log('🔐 Starting SAS verification...');
+          v = verificationRequest.beginKeyVerification('m.sas.v1');
+        } else {
+          console.log('🔐 Using existing verifier from request');
         }
         
+        console.log('Verifier:', v);
+        console.log('Verifier methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(v)));
         setVerifier(v);
 
-        // Listen for SAS emojis
+        // Listen for SAS emojis BEFORE starting verification
         v.on('show_sas', (e: any) => {
           console.log('🔐 SAS emojis received:', e.sas.emoji);
           setSasEmojis(e.sas.emoji || []);
           setStep('showing_sas');
         });
 
-        // Start the verification
+        // Listen for verification completion
+        v.on('show_reciprocal_sas', () => {
+          console.log('🔐 Reciprocal SAS shown');
+        });
+
+        // Listen for cancel events
+        v.on('cancel', () => {
+          console.log('🔐 Verification cancelled');
+          cancelVerification();
+        });
+
+        // Always call verify() to participate in the verification
+        console.log('✅ Starting/continuing verification...');
         await v.verify();
-        console.log('✅ Verification started');
+        console.log('✅ Verification in progress, waiting for emojis...');
       } catch (error) {
         console.error('❌ Verification error:', error);
-        console.error('Error details:', error);
+        console.error('Error type:', typeof error);
+        console.error('Error constructor:', error?.constructor?.name);
       }
     };
 
-    handleAccept();
-  }, [verificationRequest]);
+    handleVerification();
+
+    // Cleanup function
+    return () => {
+      if (v && typeof v.removeAllListeners === 'function') {
+        v.removeAllListeners();
+      }
+    };
+  }, [verificationRequest, cancelVerification]);
 
   const handleConfirm = async () => {
     if (verifier) {
       try {
-        await verifier.confirm();
-        setStep('confirmed');
-        console.log('✅ Verification confirmed');
+        console.log('✅ User confirmed emojis match - sending confirmation to Matrix');
         
-        // Close modal after a moment
-        setTimeout(() => {
-          cancelVerification();
-        }, 2000);
+        // Get the SAS callbacks and call confirm
+        const callbacks = verifier.getShowSasCallbacks();
+        console.log('SAS callbacks:', callbacks);
+        
+        if (callbacks && typeof callbacks.confirm === 'function') {
+          await callbacks.confirm();
+          console.log('✅ SAS confirmation sent to Matrix protocol');
+          setStep('confirmed');
+          
+          // Close modal after a moment
+          setTimeout(() => {
+            cancelVerification();
+          }, 2000);
+        } else {
+          console.error('❌ No confirm callback available');
+          alert('Unable to confirm verification - no confirm method available');
+        }
       } catch (error) {
         console.error('❌ Confirm error:', error);
+        alert(`Verification failed: ${error}`);
       }
     }
   };
 
   const handleCancel = () => {
-    if (verifier) {
-      verifier.cancel();
+    try {
+      if (verifier && typeof verifier.cancel === 'function') {
+        verifier.cancel();
+      }
+    } catch (error) {
+      console.error('Error canceling verifier:', error);
     }
+    
+    try {
+      if (verificationRequest && typeof verificationRequest.cancel === 'function') {
+        verificationRequest.cancel();
+      }
+    } catch (error) {
+      console.error('Error canceling verification request:', error);
+    }
+    
     cancelVerification();
   };
 
