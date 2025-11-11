@@ -33,7 +33,7 @@ const ThemeSelector: React.FC = () => {
           
           {/* Theme menu */}
           <div
-            className="absolute left-0 bottom-full mb-2 w-full rounded-lg shadow-lg z-50 overflow-hidden"
+            className="absolute left-0 top-full mt-2 w-full rounded-lg shadow-lg z-50 overflow-hidden"
             style={{
               backgroundColor: 'var(--color-bgSecondary)',
               border: '1px solid var(--color-border)',

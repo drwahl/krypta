@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Room, MatrixClient, MatrixEvent, RoomMember } from 'matrix-js-sdk';
-import { X, Users, Pin, Lock, Globe, UserPlus, Search, Shield, Crown, MoreVertical } from 'lucide-react';
+import { X, Users, Pin, Lock, Globe, UserPlus, Search, Shield, Crown, MoreVertical, Bell, BellOff } from 'lucide-react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { format } from 'date-fns';
 
 interface RoomInfoProps {
@@ -13,6 +14,7 @@ interface RoomInfoProps {
 const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
   const { client, getParentSpace } = useMatrix();
   const { theme, availableThemes, getRoomTheme, setRoomTheme, clearRoomTheme, getSpaceTheme, setSpaceTheme, clearSpaceTheme, defaultThemeName, currentSpaceId } = useTheme();
+  const { settings, isRoomMuted, toggleRoomMute, toggleRoomAllow } = useNotifications();
   const [activeTab, setActiveTab] = useState<'members' | 'pinned' | 'settings'>('members');
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [pinnedEvents, setPinnedEvents] = useState<MatrixEvent[]>([]);
@@ -542,6 +544,65 @@ const RoomInfo: React.FC<RoomInfoProps> = ({ room, onClose }) => {
               <p style={{ color: 'var(--color-textSecondary)' }}>
                 {isEncrypted ? 'Messages are end-to-end encrypted' : 'Messages are not encrypted'}
               </p>
+            </div>
+
+            {/* Notifications */}
+            <div>
+              <h4 className="font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Notifications</h4>
+              {settings.mode === 'all' ? (
+                <div className="flex items-center gap-2 p-3 rounded" style={{ backgroundColor: 'var(--color-bgTertiary)' }}>
+                  <Bell className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
+                  <div>
+                    <p style={{ color: 'var(--color-text)' }}>All rooms notifying</p>
+                    <p className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                      Change mode in Settings → Notifications to customize
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (settings.mode === 'muted') {
+                      toggleRoomMute(room.roomId);
+                    } else {
+                      toggleRoomAllow(room.roomId);
+                    }
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded transition hover:bg-[var(--color-hover)]"
+                  style={{
+                    backgroundColor: isRoomMuted(room.roomId) ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                    border: `1px solid ${isRoomMuted(room.roomId) ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)'}`,
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    {isRoomMuted(room.roomId) ? (
+                      <>
+                        <BellOff className="w-5 h-5" style={{ color: '#ef4444' }} />
+                        <div className="text-left">
+                          <p style={{ color: 'var(--color-text)' }}>
+                            {settings.mode === 'muted' ? 'Muted' : 'Not Allowed'}
+                          </p>
+                          <p className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                            Click to {settings.mode === 'muted' ? 'unmute' : 'allow'}
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Bell className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
+                        <div className="text-left">
+                          <p style={{ color: 'var(--color-text)' }}>
+                            {settings.mode === 'muted' ? 'Notifying' : 'Allowed'}
+                          </p>
+                          <p className="text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                            Click to {settings.mode === 'muted' ? 'mute' : 'disallow'}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </button>
+              )}
             </div>
 
             <div>

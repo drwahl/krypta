@@ -2,19 +2,31 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useMultiRoom } from '../contexts/MultiRoomContext';
-import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical } from 'lucide-react';
+import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical, Settings as SettingsIcon } from 'lucide-react';
 import { Room } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
-import ThemeSelector from './ThemeSelector';
-import SortSelector, { SortMode } from './SortSelector';
+import Settings from './Settings';
+import { SortMode } from './SortSelector';
 
 const RoomListComponent: React.FC = () => {
   const { rooms, spaces, logout, client } = useMatrix();
   const { theme } = useTheme();
   const { openRooms, addRoom, activeRoomId } = useMultiRoom();
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
-  const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(true);
+  
+  // Persist expanded spaces
+  const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem('nychatt_expanded_spaces');
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  });
+  
+  // Persist orphan rooms expanded state (default to false/collapsed)
+  const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(() => {
+    const stored = localStorage.getItem('nychatt_orphan_rooms_expanded');
+    return stored ? JSON.parse(stored) : false;
+  });
+  
+  const [showSettings, setShowSettings] = useState(false);
   
   // Sort mode
   const [sortMode, setSortMode] = useState<SortMode>(() => {
@@ -39,6 +51,16 @@ const RoomListComponent: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('room_sort_mode', sortMode);
   }, [sortMode]);
+  
+  // Persist expanded spaces
+  useEffect(() => {
+    localStorage.setItem('nychatt_expanded_spaces', JSON.stringify(Array.from(expandedSpaces)));
+  }, [expandedSpaces]);
+  
+  // Persist orphan rooms expanded state
+  useEffect(() => {
+    localStorage.setItem('nychatt_orphan_rooms_expanded', JSON.stringify(isOrphanRoomsExpanded));
+  }, [isOrphanRoomsExpanded]);
   
   // Persist custom orders
   useEffect(() => {
@@ -670,15 +692,34 @@ const RoomListComponent: React.FC = () => {
         )}
       </div>
 
-      {/* Sort and Theme Selector - Footer */}
+      {/* Settings Button - Footer */}
       <div className="border-t border-slate-700 flex-shrink-0 mt-auto" style={{ backgroundColor: 'var(--color-bgSecondary)' }}>
-        <div style={{ padding: 'var(--spacing-sidebarPadding)', borderBottom: '1px solid var(--color-border)' }}>
-          <SortSelector currentSort={sortMode} onSortChange={setSortMode} />
-        </div>
-        <div style={{ padding: 'var(--spacing-sidebarPadding)' }}>
-          <ThemeSelector />
-        </div>
+        <button
+          onClick={() => setShowSettings(true)}
+          className="w-full flex items-center gap-3 transition"
+          style={{
+            padding: theme.style.compactMode ? '0.5rem' : '0.75rem 1rem',
+            color: 'var(--color-text)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
+        >
+          <SettingsIcon style={{ width: '1.25rem', height: '1.25rem' }} />
+          <span className="font-medium">Settings</span>
+        </button>
       </div>
+
+      {/* Settings Panel */}
+      <Settings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        sortMode={sortMode}
+        onSortChange={setSortMode}
+      />
     </div>
   );
 };

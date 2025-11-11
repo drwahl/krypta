@@ -3,6 +3,7 @@ import { MatrixProvider, useMatrix } from './MatrixContext';
 import { ThreadsProvider } from './contexts/ThreadsContext';
 import { ThemeProvider } from './ThemeContext';
 import { MultiRoomProvider, useMultiRoom } from './contexts/MultiRoomContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import Login from './components/Login';
 import RoomList from './components/RoomList';
 import RoomPane from './components/RoomPane';
@@ -267,11 +268,13 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <ThemeProvider>
         <MatrixProvider>
-          <MultiRoomProvider>
-            <ThreadsProvider>
-              <ChatApp />
-            </ThreadsProvider>
-          </MultiRoomProvider>
+          <NotificationProvider>
+            <MultiRoomProvider>
+              <ThreadsProvider>
+                <ChatApp />
+              </ThreadsProvider>
+            </MultiRoomProvider>
+          </NotificationProvider>
         </MatrixProvider>
       </ThemeProvider>
     </ErrorBoundary>
