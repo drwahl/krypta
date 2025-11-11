@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MatrixProvider, useMatrix } from './MatrixContext';
+import { ThreadsProvider } from './contexts/ThreadsContext';
 import Login from './components/Login';
 import RoomList from './components/RoomList';
 import MessageTimeline from './components/MessageTimeline';
@@ -7,10 +8,12 @@ import MessageInput from './components/MessageInput';
 import ErrorBoundary from './components/ErrorBoundary';
 import VerificationBanner from './components/VerificationBanner';
 import VerificationModal from './components/VerificationModal';
-import { Loader2 } from 'lucide-react';
+import ThreadSidebar from './components/ThreadSidebar';
+import { Loader2, MessageSquare } from 'lucide-react';
 
 const ChatApp: React.FC = () => {
   const { isLoggedIn, isLoading } = useMatrix();
+  const [showThreads, setShowThreads] = useState(true);
 
   if (isLoading) {
     return (
@@ -29,12 +32,35 @@ const ChatApp: React.FC = () => {
 
   return (
     <div className="h-screen flex bg-slate-900 overflow-hidden">
+      {/* Room List */}
       <RoomList />
+
+      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         <VerificationBanner />
         <MessageTimeline />
         <MessageInput />
       </div>
+
+      {/* Thread Sidebar Toggle Button (for responsive design) */}
+      {!showThreads && (
+        <button
+          onClick={() => setShowThreads(true)}
+          className="fixed bottom-4 right-4 p-3 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg transition"
+          title="Show threads"
+        >
+          <MessageSquare className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Thread Sidebar */}
+      {showThreads && (
+        <ThreadSidebar
+          isOpen={showThreads}
+          onClose={() => setShowThreads(false)}
+        />
+      )}
+
       <VerificationModal />
     </div>
   );
@@ -44,7 +70,9 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <MatrixProvider>
-        <ChatApp />
+        <ThreadsProvider>
+          <ChatApp />
+        </ThreadsProvider>
       </MatrixProvider>
     </ErrorBoundary>
   );

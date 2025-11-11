@@ -1,4 +1,5 @@
 import { MatrixClient, Room, MatrixEvent } from 'matrix-js-sdk';
+export { Thread, ThreadMessage, ThreadBranch, ContextualObject, MessageSource, ThreadLinkingConfig } from './types/thread';
 
 export interface MatrixContextType {
   client: MatrixClient | null;
