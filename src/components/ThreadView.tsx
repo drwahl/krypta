@@ -131,9 +131,11 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
     onClose?.();
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (window.confirm(`Are you sure you want to delete "${thread.title}"? This cannot be undone.`)) {
-      deleteThread(thread.id);
+      console.log(`🗑️ User confirmed deletion of thread: ${thread.id}`);
+      await deleteThread(thread.id);
+      console.log(`🗑️ Thread deleted, closing view`);
       onClose?.();
     }
   };

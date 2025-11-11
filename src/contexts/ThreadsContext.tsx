@@ -3,7 +3,9 @@ import { ThreadManager } from '../services/threadManager';
 import { ThreadLinker } from '../services/threadLinker';
 import { ThreadSummarizer } from '../services/threadSummarizer';
 import { ThreadStorage } from '../services/threadStorage';
+import { ThreadSync } from '../services/threadSync';
 import { Thread, ThreadMessage, ContextualObject } from '../types/thread';
+import { useMatrix } from '../MatrixContext';
 
 /**
  * ThreadsContext - Shared state for all threading operations
@@ -16,7 +18,7 @@ interface ThreadsContextType {
   setSelectedThread: (thread: Thread | null) => void;
   isLoading: boolean;
   updateTrigger: number;
-  createThread: (roomId: string, title: string, description?: string) => Thread | null;
+  createThread: (roomId: string, title: string, description?: string) => Promise<Thread | null>;
   addMessage: (threadId: string, message: ThreadMessage, branchId?: string) => Promise<boolean>;
   linkMessage: (message: ThreadMessage) => Thread | null;
   linkMessages: (messages: ThreadMessage[]) => Map<string, Thread>;
@@ -29,7 +31,7 @@ interface ThreadsContextType {
   getThreadAnalysis: (threadId: string) => any;
   getRelatedThreads: (threadId: string) => Thread[];
   archiveThread: (threadId: string) => boolean;
-  deleteThread: (threadId: string) => boolean;
+  deleteThread: (threadId: string) => Promise<boolean>;
   getThreadsInRoom: (roomId: string) => Thread[];
   threadManager: ThreadManager | null;
   threadLinker: ThreadLinker | null;
@@ -39,10 +41,13 @@ interface ThreadsContextType {
 const ThreadsContext = createContext<ThreadsContextType | undefined>(undefined);
 
 export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { client, currentRoom } = useMatrix();
+  
   const threadManagerRef = useRef<ThreadManager | null>(null);
   const threadLinkerRef = useRef<ThreadLinker | null>(null);
   const summarizerRef = useRef<ThreadSummarizer | null>(null);
   const storageRef = useRef<ThreadStorage | null>(null);
+  const threadSyncRef = useRef<ThreadSync | null>(null);
   const hasLoadedRef = useRef(false);
 
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -63,6 +68,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         threadLinkerRef.current = new ThreadLinker(threadManagerRef.current);
         summarizerRef.current = new ThreadSummarizer();
         storageRef.current = new ThreadStorage();
+        threadSyncRef.current = new ThreadSync(client);
 
         if (!hasLoadedRef.current) {
           try {
@@ -93,19 +99,58 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const summarizer = summarizerRef.current;
 
   const createThread = useCallback(
-    (roomId: string, title: string, description?: string) => {
+    async (roomId: string, title: string, description?: string) => {
       if (!threadManager) return null;
-      const threadId = `thread-${roomId}-${Date.now()}`;
+      
+      console.log(`🧵 Creating native Matrix thread: ${title}`);
+      
+      // Step 1: Send root message to Matrix
+      let rootEventId: string | null = null;
+      if (client && threadSyncRef.current) {
+        const rootContent = `📌 ${title}${description ? `\n\n${description}` : ''}`;
+        rootEventId = await threadSyncRef.current.createThreadRoot(roomId, rootContent);
+        
+        if (!rootEventId) {
+          console.error('Failed to create Matrix thread root');
+          return null;
+        }
+        
+        console.log(`✅ Matrix thread root created: ${rootEventId}`);
+        
+        // Step 2: Store metadata in room state
+        await threadSyncRef.current.storeThreadMetadata(roomId, rootEventId, {
+          title,
+          description,
+          createdBy: client.getUserId() || undefined,
+          createdAt: Date.now(),
+        });
+        
+        console.log(`✅ Thread metadata stored in Matrix`);
+      }
+      
+      // Step 3: Create local thread object
+      const threadId = rootEventId || `thread-${roomId}-${Date.now()}`;
       const thread = threadManager.createThread(threadId, roomId, title, description);
+      
+      // Add root event ID to thread
+      if (rootEventId) {
+        thread.metadata = {
+          ...thread.metadata,
+          matrixRootEventId: rootEventId,
+        };
+      }
+      
       setThreads((prev) => [...prev, thread]);
       
+      // Step 4: Save to local storage
       if (storageRef.current) {
         storageRef.current.saveThread(thread).catch(console.error);
       }
       
+      console.log(`✅ Thread created: ${threadId}`);
       return thread;
     },
-    [threadManager]
+    [threadManager, client]
   );
 
   const addMessage = useCallback(
@@ -295,15 +340,34 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const deleteThread = useCallback(
-    (threadId: string) => {
+    async (threadId: string) => {
       if (!threadManager) return false;
+      
+      console.log(`🗑️ Deleting thread: ${threadId}`);
       const success = threadManager.deleteThread(threadId);
+      
       if (success) {
+        console.log(`🗑️ Thread deleted from manager`);
+        
+        // Remove from React state
         setThreads((prev) => prev.filter((t) => t.id !== threadId));
+        
+        // Clear selection if this was selected
         if (selectedThread?.id === threadId) {
           setSelectedThread(null);
         }
+        
+        // Delete from IndexedDB storage
+        if (storageRef.current) {
+          try {
+            await storageRef.current.deleteThread(threadId);
+            console.log(`🗑️ Thread deleted from storage`);
+          } catch (error) {
+            console.error('Failed to delete thread from storage:', error);
+          }
+        }
       }
+      
       return success;
     },
     [threadManager, selectedThread]

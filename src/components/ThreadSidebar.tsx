@@ -54,17 +54,24 @@ export const ThreadSidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }>
 
   if (!currentRoom) return null;
 
-  const handleCreateThread = () => {
+  const handleCreateThread = async () => {
     if (newThreadTitle.trim()) {
-      const thread = createThread(
+      console.log(`🎯 Creating thread: ${newThreadTitle}`);
+      const thread = await createThread(
         currentRoom.roomId,
         newThreadTitle,
         newThreadDescription || undefined
       );
-      setSelectedThread(thread);
-      setNewThreadTitle('');
-      setNewThreadDescription('');
-      setShowNewThreadForm(false);
+      
+      if (thread) {
+        console.log(`✅ Thread created successfully`);
+        setSelectedThread(thread);
+        setNewThreadTitle('');
+        setNewThreadDescription('');
+        setShowNewThreadForm(false);
+      } else {
+        console.error('❌ Failed to create thread');
+      }
     }
   };
 
