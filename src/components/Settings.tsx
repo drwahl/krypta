@@ -3,6 +3,7 @@ import { X, Palette, Bell, SortAsc } from 'lucide-react';
 import ThemeSelector from './ThemeSelector';
 import NotificationSettings from './NotificationSettings';
 import SortSelector, { SortMode } from './SortSelector';
+import { useMultiRoom } from '../contexts/MultiRoomContext';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({ isOpen, onClose, sortMode, onSortChange }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'appearance'>('general');
+  const { maxRooms, setMaxRooms } = useMultiRoom();
 
   if (!isOpen) return null;
 
@@ -59,44 +61,44 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose, sortMode, onSortCh
         >
           <button
             onClick={() => setActiveTab('general')}
-            className="flex-1 px-4 py-3 text-sm font-medium transition"
+            className="flex-1 px-2 py-3 text-sm font-medium transition min-w-0"
             style={{
               color: activeTab === 'general' ? 'var(--color-primary)' : 'var(--color-textMuted)',
               borderBottom: activeTab === 'general' ? '2px solid var(--color-primary)' : 'none',
               backgroundColor: activeTab === 'general' ? 'var(--color-bg)' : 'transparent',
             }}
           >
-            <div className="flex items-center justify-center gap-2">
-              <SortAsc className="w-4 h-4" />
-              General
+            <div className="flex items-center justify-center gap-1.5">
+              <SortAsc className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">General</span>
             </div>
           </button>
           <button
             onClick={() => setActiveTab('notifications')}
-            className="flex-1 px-4 py-3 text-sm font-medium transition"
+            className="flex-1 px-2 py-3 text-sm font-medium transition min-w-0"
             style={{
               color: activeTab === 'notifications' ? 'var(--color-primary)' : 'var(--color-textMuted)',
               borderBottom: activeTab === 'notifications' ? '2px solid var(--color-primary)' : 'none',
               backgroundColor: activeTab === 'notifications' ? 'var(--color-bg)' : 'transparent',
             }}
           >
-            <div className="flex items-center justify-center gap-2">
-              <Bell className="w-4 h-4" />
-              Notifications
+            <div className="flex items-center justify-center gap-1.5">
+              <Bell className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">Notify</span>
             </div>
           </button>
           <button
             onClick={() => setActiveTab('appearance')}
-            className="flex-1 px-4 py-3 text-sm font-medium transition"
+            className="flex-1 px-2 py-3 text-sm font-medium transition min-w-0"
             style={{
               color: activeTab === 'appearance' ? 'var(--color-primary)' : 'var(--color-textMuted)',
               borderBottom: activeTab === 'appearance' ? '2px solid var(--color-primary)' : 'none',
               backgroundColor: activeTab === 'appearance' ? 'var(--color-bg)' : 'transparent',
             }}
           >
-            <div className="flex items-center justify-center gap-2">
-              <Palette className="w-4 h-4" />
-              Appearance
+            <div className="flex items-center justify-center gap-1.5">
+              <Palette className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">Theme</span>
             </div>
           </button>
         </div>
@@ -115,6 +117,43 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose, sortMode, onSortCh
                   Room Sorting
                 </label>
                 <SortSelector currentSort={sortMode} onSortChange={onSortChange} />
+              </div>
+
+              {/* Max Open Rooms */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>
+                  Maximum Open Rooms
+                </label>
+                <p className="text-xs mb-3" style={{ color: 'var(--color-textMuted)' }}>
+                  When opening more rooms than this limit, the oldest room will be closed automatically.
+                </p>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={maxRooms}
+                    onChange={(e) => setMaxRooms(parseInt(e.target.value, 10))}
+                    className="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, var(--color-primary) 0%, var(--color-primary) ${((maxRooms - 1) / 9) * 100}%, var(--color-border) ${((maxRooms - 1) / 9) * 100}%, var(--color-border) 100%)`,
+                    }}
+                  />
+                  <div
+                    className="w-16 text-center py-2 px-3 rounded font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-bgSecondary)',
+                      color: 'var(--color-text)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  >
+                    {maxRooms}
+                  </div>
+                </div>
+                <div className="flex justify-between mt-2 text-xs" style={{ color: 'var(--color-textMuted)' }}>
+                  <span>1 room</span>
+                  <span>10 rooms</span>
+                </div>
               </div>
             </div>
           )}

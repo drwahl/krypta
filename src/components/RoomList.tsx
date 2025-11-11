@@ -3,11 +3,179 @@ import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useMultiRoom } from '../contexts/MultiRoomContext';
 import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical, Settings as SettingsIcon } from 'lucide-react';
-import { Room } from 'matrix-js-sdk';
+import { Room, MatrixClient } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import Settings from './Settings';
 import Invites from './Invites';
 import { SortMode } from './SortSelector';
+import { Theme } from '../themeTypes';
+
+// Extracted RoomItem component for proper memoization
+interface RoomItemProps {
+  room: Room;
+  indent?: boolean;
+  spaceId?: string;
+  client: MatrixClient | null;
+  theme: Theme;
+  openRooms: Room[];
+  activeRoomId: string | null;
+  draggedItem: { type: 'space' | 'room'; id: string; spaceId?: string } | null;
+  sortMode: SortMode;
+  onAddRoom: (room: Room) => void;
+  onDragStart: (e: React.DragEvent, type: 'space' | 'room', id: string, spaceId?: string) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent, targetType: 'space' | 'room', targetId: string, targetSpaceId?: string) => void;
+  onDragEnd: () => void;
+}
+
+const RoomItem: React.FC<RoomItemProps> = React.memo(({
+  room,
+  indent = false,
+  spaceId,
+  client,
+  theme,
+  openRooms,
+  activeRoomId,
+  draggedItem,
+  sortMode,
+  onAddRoom,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}) => {
+  const isOpen = openRooms.some(r => r.roomId === room.roomId);
+  const isActive = activeRoomId === room.roomId;
+  const unreadCount = room.getUnreadNotificationCount();
+  const isDragging = draggedItem?.type === 'room' && draggedItem.id === room.roomId;
+  const members = room.getJoinedMemberCount();
+  const isEncrypted = room.hasEncryptionStateEvent();
+  const avatarUrl = useMemo(() => getRoomAvatarUrl(room, client, 32), [room, client]);
+  const initials = useMemo(() => getRoomInitials(room.name), [room.name]);
+
+  // Determine if this is a DM (2 members total, including self)
+  const isDM = members === 2;
+  
+  // Build display name with Unix-style paths for terminal theme
+  let displayName = room.name;
+  if (theme.style.showRoomPrefix) {
+    const prefix = isDM ? '/home/' : '/usr/bin/';
+    displayName = `${prefix}${room.name}`;
+  }
+
+  return (
+    <button
+      onClick={() => onAddRoom(room)}
+      draggable={sortMode === 'custom'}
+      onDragStart={(e) => onDragStart(e, 'room', room.roomId, spaceId)}
+      onDragOver={onDragOver}
+      onDrop={(e) => onDrop(e, 'room', room.roomId, spaceId)}
+      onDragEnd={onDragEnd}
+      className={`w-full flex items-center transition ${
+        isActive ? 'border-l-2' : ''
+      }`}
+      style={{
+        padding: theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '0.75rem 1rem',
+        paddingLeft: indent ? (theme.style.compactMode ? '2rem' : '2.5rem') : (theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '1rem'),
+        gap: theme.style.compactMode ? 'var(--spacing-roomItemGap)' : '0.5rem',
+        backgroundColor: isActive ? 'var(--color-hover)' : (isOpen ? 'var(--color-bgTertiary)' : 'transparent'),
+        borderLeftColor: isActive ? 'var(--color-primary)' : (isOpen ? 'var(--color-accent)' : 'transparent'),
+        borderRadius: 'var(--sizing-borderRadius)',
+        fontSize: 'var(--sizing-textBase)',
+        opacity: isDragging ? 0.5 : 1,
+        cursor: sortMode === 'custom' ? 'grab' : 'pointer',
+      }}
+      onMouseEnter={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }
+      }}
+    >
+      {/* Drag handle for custom sort mode */}
+      {sortMode === 'custom' && (
+        <GripVertical 
+          className="flex-shrink-0" 
+          style={{ 
+            width: '1rem', 
+            height: '1rem', 
+            color: 'var(--color-textMuted)' 
+          }} 
+        />
+      )}
+      
+      {/* Room Avatar or Initials - Show smaller in compact mode */}
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={room.name}
+          className="flex-shrink-0 object-cover"
+          style={{
+            width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+            height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+            borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
+          }}
+        />
+      ) : (
+        <div 
+          className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
+          style={{
+            width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+            height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
+            borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
+            fontSize: theme.style.compactMode ? '0.5rem' : 'var(--sizing-textXs)',
+            color: 'var(--color-text)',
+          }}
+        >
+          {initials}
+        </div>
+      )}
+      <div className="flex-1 min-w-0 text-left flex items-center" style={{ gap: '0.25rem' }}>
+        <p 
+          className="font-medium truncate"
+          style={{
+            color: isActive ? 'var(--color-text)' : 'var(--color-textSecondary)',
+            fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
+          }}
+        >
+          {displayName}
+        </p>
+        {isEncrypted && (
+          <Lock 
+            className="flex-shrink-0" 
+            style={{ 
+              width: theme.style.compactMode ? '0.7rem' : '0.75rem',
+              height: theme.style.compactMode ? '0.7rem' : '0.75rem',
+              color: 'var(--color-success)',
+            }} 
+            title="Encrypted room" 
+          />
+        )}
+      </div>
+      {unreadCount > 0 && (
+        <div 
+          className="font-bold flex items-center justify-center flex-shrink-0"
+          style={{
+            backgroundColor: 'var(--color-primary)',
+            color: theme.name === 'terminal' ? '#000' : '#fff',
+            fontSize: 'var(--sizing-textXs)',
+            borderRadius: theme.style.compactMode ? '0' : '9999px',
+            width: theme.style.compactMode ? 'auto' : '1.25rem',
+            height: theme.style.compactMode ? 'auto' : '1.25rem',
+            padding: theme.style.compactMode ? '0.125rem 0.25rem' : '0',
+            minWidth: theme.style.compactMode ? 'auto' : '1.25rem',
+          }}
+        >
+          {unreadCount > 9 ? '9+' : unreadCount}
+        </div>
+      )}
+    </button>
+  );
+});
 
 const RoomListComponent: React.FC = () => {
   const { rooms, spaces, logout, client } = useMatrix();
@@ -270,140 +438,6 @@ const RoomListComponent: React.FC = () => {
     setDraggedItem(null);
   };
 
-  const RoomItem: React.FC<{ room: Room; indent?: boolean; spaceId?: string }> = ({ room, indent = false, spaceId }) => {
-    const isOpen = openRooms.some(r => r.roomId === room.roomId);
-    const isActive = activeRoomId === room.roomId;
-    const unreadCount = getUnreadCount(room);
-    const isDragging = draggedItem?.type === 'room' && draggedItem.id === room.roomId;
-    const members = room.getJoinedMemberCount();
-    const isEncrypted = room.hasEncryptionStateEvent();
-    const avatarUrl = getRoomAvatarUrl(room, client, 32);
-    const initials = getRoomInitials(room.name);
-
-    // Determine if this is a DM (2 members total, including self)
-    const isDM = members === 2;
-    
-    // Build display name with Unix-style paths for terminal theme
-    let displayName = room.name;
-    if (theme.style.showRoomPrefix) {
-      const prefix = isDM ? '/home/' : '/usr/bin/';
-      displayName = `${prefix}${room.name}`;
-    }
-
-    return (
-      <button
-        onClick={() => addRoom(room)}
-        draggable={sortMode === 'custom'}
-        onDragStart={(e) => handleDragStart(e, 'room', room.roomId, spaceId)}
-        onDragOver={handleDragOver}
-        onDrop={(e) => handleDrop(e, 'room', room.roomId, spaceId)}
-        onDragEnd={handleDragEnd}
-        className={`w-full flex items-center transition ${
-          isActive ? 'border-l-2' : ''
-        }`}
-        style={{
-          padding: theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '0.75rem 1rem',
-          paddingLeft: indent ? (theme.style.compactMode ? '2rem' : '2.5rem') : (theme.style.compactMode ? 'var(--spacing-roomItemPadding)' : '1rem'),
-          gap: theme.style.compactMode ? 'var(--spacing-roomItemGap)' : '0.5rem',
-          backgroundColor: isActive ? 'var(--color-hover)' : (isOpen ? 'var(--color-bgTertiary)' : 'transparent'),
-          borderLeftColor: isActive ? 'var(--color-primary)' : (isOpen ? 'var(--color-accent)' : 'transparent'),
-          borderRadius: 'var(--sizing-borderRadius)',
-          fontSize: 'var(--sizing-textBase)',
-          opacity: isDragging ? 0.5 : 1,
-          cursor: sortMode === 'custom' ? 'grab' : 'pointer',
-        }}
-        onMouseEnter={(e) => {
-          if (!isActive) {
-            e.currentTarget.style.backgroundColor = 'var(--color-hover)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isActive) {
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }
-        }}
-      >
-        {/* Drag handle for custom sort mode */}
-        {sortMode === 'custom' && (
-          <GripVertical 
-            className="flex-shrink-0" 
-            style={{ 
-              width: '1rem', 
-              height: '1rem', 
-              color: 'var(--color-textMuted)' 
-            }} 
-          />
-        )}
-        
-        {/* Room Avatar or Initials - Show smaller in compact mode */}
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt={room.name}
-            className="flex-shrink-0 object-cover"
-            style={{
-              width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-              height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-              borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
-            }}
-          />
-        ) : (
-          <div 
-            className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
-            style={{
-              width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-              height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-              borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
-              fontSize: theme.style.compactMode ? '0.5rem' : 'var(--sizing-textXs)',
-              color: 'var(--color-text)',
-            }}
-          >
-            {initials}
-          </div>
-        )}
-        <div className="flex-1 min-w-0 text-left flex items-center" style={{ gap: '0.25rem' }}>
-          <p 
-            className="font-medium truncate"
-            style={{
-              color: isActive ? 'var(--color-text)' : 'var(--color-textSecondary)',
-              fontFamily: theme.style.compactMode ? 'var(--font-mono)' : 'inherit',
-            }}
-          >
-            {displayName}
-          </p>
-          {isEncrypted && (
-            <Lock 
-              className="flex-shrink-0" 
-              style={{ 
-                width: theme.style.compactMode ? '0.7rem' : '0.75rem',
-                height: theme.style.compactMode ? '0.7rem' : '0.75rem',
-                color: 'var(--color-success)',
-              }} 
-              title="Encrypted room" 
-            />
-          )}
-        </div>
-        {unreadCount > 0 && (
-          <div 
-            className="font-bold flex items-center justify-center flex-shrink-0"
-            style={{
-              backgroundColor: 'var(--color-primary)',
-              color: theme.name === 'terminal' ? '#000' : '#fff',
-              fontSize: 'var(--sizing-textXs)',
-              borderRadius: theme.style.compactMode ? '0' : '9999px',
-              width: theme.style.compactMode ? 'auto' : '1.25rem',
-              height: theme.style.compactMode ? 'auto' : '1.25rem',
-              padding: theme.style.compactMode ? '0.125rem 0.25rem' : '0',
-              minWidth: theme.style.compactMode ? 'auto' : '1.25rem',
-            }}
-          >
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </div>
-        )}
-      </button>
-    );
-  };
-
   return (
     <div 
       className="w-80 flex flex-col h-full flex-shrink-0"
@@ -583,7 +617,23 @@ const RoomListComponent: React.FC = () => {
                   {isOrphanRoomsExpanded && (
                     <div>
                       {sortRoomsInSpace(filteredOrphanRooms, 'orphan').map((room) => (
-                        <RoomItem key={room.roomId} room={room} indent={true} spaceId={undefined} />
+                        <RoomItem 
+                          key={room.roomId} 
+                          room={room} 
+                          indent={true} 
+                          spaceId={undefined}
+                          client={client}
+                          theme={theme}
+                          openRooms={openRooms}
+                          activeRoomId={activeRoomId}
+                          draggedItem={draggedItem}
+                          sortMode={sortMode}
+                          onAddRoom={addRoom}
+                          onDragStart={handleDragStart}
+                          onDragOver={handleDragOver}
+                          onDrop={handleDrop}
+                          onDragEnd={handleDragEnd}
+                        />
                       ))}
                     </div>
                   )}
@@ -603,6 +653,10 @@ const RoomListComponent: React.FC = () => {
               if (searchQuery && filteredSpaceRooms.length === 0) {
                 return null;
               }
+
+              // Memoize avatar calculations outside JSX
+              const spaceAvatarUrl = getRoomAvatarUrl(space, client, 32);
+              const spaceInitials = getRoomInitials(space.name);
 
               return (
                 <div key={space.roomId}>
@@ -637,32 +691,28 @@ const RoomListComponent: React.FC = () => {
                     ) : (
                       <ChevronRight className="w-4 h-4 text-slate-400" />
                     )}
-                    {(() => {
-                      const spaceAvatarUrl = getRoomAvatarUrl(space, client, 32);
-                      const spaceInitials = getRoomInitials(space.name);
-                      return spaceAvatarUrl ? (
-                        <img
-                          src={spaceAvatarUrl}
-                          alt={space.name}
-                          className="rounded-md flex-shrink-0 object-cover"
-                          style={{
-                            width: theme.style.compactMode ? '1rem' : '1.5rem',
-                            height: theme.style.compactMode ? '1rem' : '1.5rem',
-                          }}
-                        />
-                      ) : (
-                        <div 
-                          className="rounded-md bg-primary-500 flex items-center justify-center text-white font-semibold flex-shrink-0"
-                          style={{
-                            width: theme.style.compactMode ? '1rem' : '1.5rem',
-                            height: theme.style.compactMode ? '1rem' : '1.5rem',
-                            fontSize: theme.style.compactMode ? '0.5rem' : '0.75rem',
-                          }}
-                        >
-                          {spaceInitials}
-                        </div>
-                      );
-                    })()}
+                    {spaceAvatarUrl ? (
+                      <img
+                        src={spaceAvatarUrl}
+                        alt={space.name}
+                        className="rounded-md flex-shrink-0 object-cover"
+                        style={{
+                          width: theme.style.compactMode ? '1rem' : '1.5rem',
+                          height: theme.style.compactMode ? '1rem' : '1.5rem',
+                        }}
+                      />
+                    ) : (
+                      <div 
+                        className="rounded-md bg-primary-500 flex items-center justify-center text-white font-semibold flex-shrink-0"
+                        style={{
+                          width: theme.style.compactMode ? '1rem' : '1.5rem',
+                          height: theme.style.compactMode ? '1rem' : '1.5rem',
+                          fontSize: theme.style.compactMode ? '0.5rem' : '0.75rem',
+                        }}
+                      >
+                        {spaceInitials}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0 text-left">
                       <p 
                         className="text-sm font-semibold text-white truncate"
@@ -685,7 +735,23 @@ const RoomListComponent: React.FC = () => {
                   {isExpanded && (
                     <div>
                       {sortRoomsInSpace(filteredSpaceRooms, space.roomId).map((room) => (
-                        <RoomItem key={room.roomId} room={room} indent={true} spaceId={space.roomId} />
+                        <RoomItem 
+                          key={room.roomId} 
+                          room={room} 
+                          indent={true} 
+                          spaceId={space.roomId}
+                          client={client}
+                          theme={theme}
+                          openRooms={openRooms}
+                          activeRoomId={activeRoomId}
+                          draggedItem={draggedItem}
+                          sortMode={sortMode}
+                          onAddRoom={addRoom}
+                          onDragStart={handleDragStart}
+                          onDragOver={handleDragOver}
+                          onDrop={handleDrop}
+                          onDragEnd={handleDragEnd}
+                        />
                       ))}
                     </div>
                   )}

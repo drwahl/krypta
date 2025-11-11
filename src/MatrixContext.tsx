@@ -422,8 +422,9 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.log('Final window.Olm:', (window as any).Olm);
         console.log('Final window.Olm.init:', (window as any).Olm?.init);
         
-        await loggedInClient.initCrypto();
-        console.log('✅ Crypto initialized successfully');
+        // In matrix-js-sdk v19+, crypto is initialized automatically when the client starts
+        // No need to call initCrypto() - it will happen during startClient()
+        console.log('✅ Crypto will be initialized automatically during client start');
         
         // Allow sending to unverified devices (like Element does)
         loggedInClient.setGlobalErrorOnUnknownDevices(false);
@@ -845,8 +846,9 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.log('window.Olm [restored]:', (window as any).Olm);
             console.log('window.Olm.init [restored]:', (window as any).Olm?.init);
             
-            await restoredClient.initCrypto();
-            console.log('✅ Crypto initialized successfully (restored session)');
+            // In matrix-js-sdk v19+, crypto is initialized automatically when the client starts
+            // No need to call initCrypto() - it will happen during startClient()
+            console.log('✅ Crypto will be initialized automatically during client start');
             
             // Allow sending to unverified devices (like Element does)
             restoredClient.setGlobalErrorOnUnknownDevices(false);
