@@ -659,6 +659,12 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
           return false;
         }
         
+        // Filter out system messages (like thread root markers)
+        // Note: Could also use ThreadSync.isSystemMessage(event) but avoiding dependency
+        if (content['com.nychatt.is_system_message'] === true) {
+          return false;
+        }
+        
         return true;
       });
       setMessages(messageEvents);

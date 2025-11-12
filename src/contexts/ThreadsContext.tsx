@@ -61,6 +61,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const initializeThreading = async () => {
       if (!threadManagerRef.current) {
         console.log(`🔧 Initializing threading system (Context Provider)...`);
+        console.log(`   Client available: ${!!client}`);
         threadManagerRef.current = new ThreadManager({
           similarityThreshold: 0.6,
           contextWindow: 5 * 60 * 1000,
@@ -69,7 +70,15 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         threadLinkerRef.current = new ThreadLinker(threadManagerRef.current);
         summarizerRef.current = new ThreadSummarizer();
         storageRef.current = new ThreadStorage();
-        threadSyncRef.current = new ThreadSync(client);
+        
+        // Only create ThreadSync if client is available
+        if (client) {
+          console.log(`   Creating ThreadSync with client`);
+          threadSyncRef.current = new ThreadSync(client);
+        } else {
+          console.log(`   ⚠️ Client not available, ThreadSync will be created later`);
+          threadSyncRef.current = new ThreadSync(null);
+        }
 
         if (!hasLoadedRef.current) {
           try {
@@ -328,18 +337,33 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const createThread = useCallback(
     async (roomId: string, title: string, description?: string) => {
-      if (!threadManager) return null;
-      if (!client) {
-        console.error('Matrix client not initialized');
+      if (!threadManager) {
+        console.error('❌ ThreadManager not initialized');
         return null;
+      }
+      if (!client) {
+        console.error('❌ Matrix client not initialized');
+        return null;
+      }
+      if (!threadSyncRef.current) {
+        console.error('❌ ThreadSync not initialized, creating now...');
+        threadSyncRef.current = new ThreadSync(client);
+      } else {
+        // Ensure ThreadSync has the current client
+        console.log(`🔄 Updating ThreadSync client...`);
+        threadSyncRef.current.setClient(client);
       }
       
       console.log(`🧵 Creating native Matrix thread: "${title}"`);
       console.log(`🧵 Room ID: ${roomId}`);
+      console.log(`🧵 ThreadSync initialized: ${!!threadSyncRef.current}`);
+      console.log(`🧵 Client available: ${!!client}`);
       
       // Step 1: Send root message to Matrix (this is a regular message, NOT threaded)
       const rootContent = `📌 ${title}${description ? `\n\n${description}` : ''}`;
-      const rootEventId = await threadSyncRef.current?.createThreadRoot(roomId, rootContent);
+      
+      console.log(`📤 Sending thread root message to Matrix...`);
+      const rootEventId = await threadSyncRef.current.createThreadRoot(roomId, rootContent);
       
       if (!rootEventId) {
         console.error('❌ Failed to create Matrix thread root - no event ID returned');

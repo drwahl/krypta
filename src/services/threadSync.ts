@@ -22,6 +22,22 @@ export class ThreadSync {
   }
 
   /**
+   * Check if a Matrix event is a thread root marker
+   */
+  static isThreadRootMarker(event: MatrixEvent): boolean {
+    const content = event.getContent();
+    return content['com.nychatt.thread_root'] === true;
+  }
+
+  /**
+   * Check if a Matrix event is a system message that should be hidden from timeline
+   */
+  static isSystemMessage(event: MatrixEvent): boolean {
+    const content = event.getContent();
+    return content['com.nychatt.is_system_message'] === true;
+  }
+
+  /**
    * Send a message to a thread in Matrix
    * Uses m.relates_to with m.thread relation type
    */
@@ -73,8 +89,13 @@ export class ThreadSync {
     roomId: string,
     content: string
   ): Promise<string | null> {
+    console.log(`🔧 ThreadSync.createThreadRoot called`);
+    console.log(`   Client initialized: ${!!this.client}`);
+    console.log(`   Room ID: ${roomId}`);
+    console.log(`   Content length: ${content.length}`);
+    
     if (!this.client) {
-      console.error('Matrix client not initialized');
+      console.error('❌ Matrix client not initialized in ThreadSync');
       return null;
     }
 
@@ -84,18 +105,31 @@ export class ThreadSync {
         msgtype: 'm.text',
         format: 'org.matrix.custom.html',
         formatted_body: content.replace(/\n/g, '<br/>'),
+        // Custom metadata to identify this as a thread root
+        'com.nychatt.thread_root': true,
+        'com.nychatt.is_system_message': true, // Mark as system message to hide from timeline
       };
 
-      const eventId = await this.client.sendEvent(
+      console.log(`📤 Sending thread root message to room ${roomId}...`);
+      console.log(`   Metadata: thread_root=true, is_system_message=true`);
+      const result = await this.client.sendEvent(
         roomId,
         'm.room.message',
         messageContent
       );
 
-      console.log(`✅ Thread root created: ${eventId}`);
+      console.log(`📨 Send event result:`, result);
+      const eventId = result?.event_id || result;
+      
+      if (!eventId) {
+        console.error('❌ No event ID in response:', result);
+        return null;
+      }
+
+      console.log(`✅ Thread root created with event ID: ${eventId}`);
       return eventId;
     } catch (error) {
-      console.error('Failed to create thread root:', error);
+      console.error('❌ Failed to create thread root:', error);
       return null;
     }
   }
