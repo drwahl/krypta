@@ -12,7 +12,6 @@ import {
 import type { MatrixClient, MatrixEvent, Room } from 'matrix-js-sdk';
 import type { SendDelayedEventRequestOpts } from 'matrix-js-sdk/lib/@types/requests';
 import { UpdateDelayedEventAction } from 'matrix-js-sdk/lib/@types/requests';
-import { UnsupportedDelayedEventsEndpointError } from 'matrix-js-sdk/lib/errors';
 
 interface TurnServerCredentials {
   uris: string[];
@@ -139,9 +138,6 @@ export class ElementCallWidgetDriver extends WidgetDriver {
         delayId: String(response.delay_id),
       };
     } catch (error) {
-      if (error instanceof UnsupportedDelayedEventsEndpointError) {
-        throw error;
-      }
       console.error('[ElementCallWidgetDriver] Failed to send delayed event', error);
       throw error;
     }

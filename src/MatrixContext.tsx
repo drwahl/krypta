@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { createClient, MatrixClient, ClientEvent, RoomEvent, Room, IndexedDBStore, IndexedDBCryptoStore, MatrixEvent } from 'matrix-js-sdk';
 import { MatrixContextType, ThemeDefinition, ThemeServerDefault } from './types';
 import { Theme } from './themeTypes';
@@ -48,6 +48,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [roomThemeDefaults, setRoomThemeDefaults] = useState<Record<string, ThemeServerDefault>>({});
   const [spaceThemeDefaults, setSpaceThemeDefaults] = useState<Record<string, ThemeServerDefault>>({});
   const [themeDefinitions, setThemeDefinitions] = useState<Record<string, Record<string, ThemeDefinition>>>({});
+  const isLoggingOutRef = useRef(false); // Track if we're already logging out to prevent duplicate alerts
 
   // Wrapper for setCurrentRoom that also persists to localStorage
   const setCurrentRoom = useCallback((room: Room | null) => {
@@ -235,9 +236,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             await restoredClient.initCrypto();
             console.log('✅ Crypto initialized from cache');
             
-            // Allow sending to unverified devices (like Element does)
-            restoredClient.setGlobalErrorOnUnknownDevices(false);
-            console.log('✅ Crypto configured to allow unverified devices');
+            // Note: setGlobalErrorOnUnknownDevices removed in v39+ - handled by new crypto API
             
             restoredClient.on('crypto.verification.request' as any, (request: any) => {
               setVerificationRequest(request);
@@ -303,8 +302,8 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         } catch (error) {
           console.error('❌ Failed to restore session:', error);
           clearTimeout(restoreTimeout);
-          // Clear invalid session
-          localStorage.removeItem('mx_homeserver');
+          // Clear invalid session (keep homeserver for convenience)
+          // localStorage.removeItem('mx_homeserver');
           localStorage.removeItem('mx_access_token');
           localStorage.removeItem('mx_user_id');
           localStorage.removeItem('mx_device_id');
@@ -319,6 +318,39 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     restoreSession();
   }, [updateRoomsAndSpaces]);
+
+  // Helper function to discover sliding sync proxy from .well-known
+  const discoverSlidingSyncProxy = async (homeserver: string): Promise<string | null> => {
+    try {
+      // Try to fetch .well-known/matrix/client
+      const wellKnownUrl = new URL('/.well-known/matrix/client', homeserver).toString();
+      console.log('🔍 Checking for sliding sync proxy at:', wellKnownUrl);
+      
+      const response = await fetch(wellKnownUrl);
+      if (!response.ok) {
+        console.log('ℹ️ No .well-known found, will use homeserver directly');
+        return null;
+      }
+      
+      const wellKnown = await response.json();
+      console.log('📋 .well-known data:', wellKnown);
+      
+      // Check for sliding sync proxy URL in .well-known
+      // The spec uses org.matrix.msc3575.proxy for sliding sync
+      const slidingSyncUrl = wellKnown['org.matrix.msc3575.proxy']?.url;
+      
+      if (slidingSyncUrl) {
+        console.log('✅ Found sliding sync proxy:', slidingSyncUrl);
+        return slidingSyncUrl;
+      } else {
+        console.log('ℹ️ No sliding sync proxy in .well-known');
+        return null;
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to fetch .well-known:', error);
+      return null;
+    }
+  };
 
   const login = async (homeserver: string, username: string, password: string) => {
     console.log('🔑 Starting login process...');
@@ -367,8 +399,16 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         localStorage.setItem('mx_device_id', deviceId);
       }
       
-      // Try sliding sync proxy from storage, or default to homeserver
-      const slidingSyncProxy = localStorage.getItem('mx_sliding_sync_proxy') || homeserver;
+      // Auto-discover sliding sync proxy from .well-known
+      const discoveredProxy = await discoverSlidingSyncProxy(homeserver);
+      const slidingSyncProxy = discoveredProxy || homeserver;
+      
+      // Store the discovered proxy for session restoration
+      if (discoveredProxy) {
+        localStorage.setItem('mx_sliding_sync_proxy', discoveredProxy);
+      } else {
+        localStorage.removeItem('mx_sliding_sync_proxy');
+      }
 
       const clientConfig: any = {
         baseUrl: homeserver,
@@ -377,24 +417,17 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         deviceId: deviceId,
       };
 
-      // Try to initialize IndexedDB store for caching (optional - will work without it)
-      try {
-        console.log('📦 Initializing IndexedDB store for caching...');
-        const indexedDBStore = new IndexedDBStore({
-          indexedDB: window.indexedDB,
-          dbName: 'matrix-js-sdk:store',
-          workerFactory: undefined,
-        });
-
-        await indexedDBStore.startup();
-        console.log('✅ IndexedDB store initialized');
-        
-        clientConfig.store = indexedDBStore;
-        clientConfig.cryptoStore = new IndexedDBCryptoStore(window.indexedDB, 'matrix-js-sdk:crypto');
-      } catch (storeError) {
-        console.warn('⚠️ Failed to initialize IndexedDB store, continuing without caching:', storeError);
-        // Login will still work without the store
-      }
+      // Create IndexedDB stores for caching and crypto (v34 legacy crypto)
+      console.log('📦 Creating IndexedDB stores...');
+      const indexedDBStore = new IndexedDBStore({
+        indexedDB: window.indexedDB,
+        dbName: 'matrix-js-sdk:store',
+        workerFactory: undefined,
+      });
+      const cryptoStore = new IndexedDBCryptoStore(window.indexedDB, 'matrix-js-sdk:crypto');
+      
+      clientConfig.store = indexedDBStore;
+      clientConfig.cryptoStore = cryptoStore;
 
       // Try sliding sync first
       let loggedInClient: MatrixClient;
@@ -410,18 +443,30 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         loggedInClient = createClient(clientConfig);
       }
       
-      // Initialize crypto - this is required for E2EE
+      // NOW initialize the store after it's been assigned to the client
       try {
-        // Check if Olm is already loaded and properly initialized
-        if (!(window as any).Olm || typeof (window as any).Olm?.init !== 'function') {
+        await indexedDBStore.startup();
+        console.log('✅ IndexedDB store initialized');
+      } catch (storeError) {
+        console.warn('⚠️ Failed to initialize IndexedDB store, continuing anyway:', storeError);
+        // Crypto should still work even if store initialization fails
+      }
+      
+      // Initialize crypto - this is required for E2EE (v34 legacy crypto)
+      try {
+        // Check if Olm is already loaded
+        const olmExists = (window as any).Olm;
+        const olmIsInitialized = olmExists && typeof olmExists.init === 'function';
+        
+        if (!olmIsInitialized) {
+          console.log('📦 Loading Olm library...');
+          
           // Load Olm from public directory (copied by postinstall script)
           const loadOlm = () => new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = '/olm.js';
             script.onload = () => {
-              console.log('olm.js script loaded');
-              console.log('window.Olm after load:', (window as any).Olm);
-              console.log('typeof window.Olm:', typeof (window as any).Olm);
+              console.log('✅ olm.js script loaded');
               resolve(true);
             };
             script.onerror = () => reject(new Error('Failed to load olm.js'));
@@ -430,31 +475,29 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           
           await loadOlm();
           
-          // olm.js defines a global Olm function, call it to initialize
-          if (typeof (window as any).Olm === 'function') {
-            console.log('Calling Olm() to initialize...');
-            const OlmInstance = await (window as any).Olm();
-            console.log('OlmInstance:', OlmInstance);
+          // Check if Olm needs to be initialized (it's a function) or is already an object
+          const olmAfterLoad = (window as any).Olm;
+          
+          if (typeof olmAfterLoad === 'function') {
+            // Olm is a function, call it to initialize
+            console.log('🔧 Initializing Olm...');
+            const OlmInstance = await olmAfterLoad();
             (window as any).Olm = OlmInstance;
-            console.log('Olm loaded and initialized from /olm.js');
+            console.log('✅ Olm initialized');
+          } else if (typeof olmAfterLoad === 'object' && olmAfterLoad?.init) {
+            // Olm is already initialized as an object
+            console.log('✅ Olm already initialized');
           } else {
-            console.error('Olm script loaded but window.Olm is not a function');
-            console.error('typeof window.Olm:', typeof (window as any).Olm);
-            console.error('window.Olm value:', (window as any).Olm);
+            console.error('❌ Unexpected Olm state:', typeof olmAfterLoad);
           }
+        } else {
+          console.log('✅ Olm already available');
         }
         
-        // Verify Olm is properly loaded
-        console.log('Final window.Olm:', (window as any).Olm);
-        console.log('Final window.Olm.init:', (window as any).Olm?.init);
-        
-        // In matrix-js-sdk v19+, crypto is initialized automatically when the client starts
-        // No need to call initCrypto() - it will happen during startClient()
-        console.log('✅ Crypto will be initialized automatically during client start');
-        
-        // Allow sending to unverified devices (like Element does)
-        loggedInClient.setGlobalErrorOnUnknownDevices(false);
-        console.log('✅ Crypto configured to allow unverified devices');
+        // In matrix-js-sdk v34, we need to explicitly call initCrypto()
+        console.log('🔐 Initializing legacy crypto (v34)...');
+        await loggedInClient.initCrypto();
+        console.log('✅ Legacy crypto initialized');
         
         // Listen for verification requests
         loggedInClient.on('crypto.verification.request' as any, (request: any) => {
@@ -468,8 +511,72 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       
       // Listen for session invalidation (e.g., force logout from another client)
       loggedInClient.on('Session.logged_out' as any, () => {
-        console.log('⚠️ Session invalidated - logging out');
-        logout();
+        if (isLoggingOutRef.current) return; // Already logging out, skip
+        isLoggingOutRef.current = true;
+        
+        console.log('⚠️ Session invalidated by server - logging out');
+        
+        // Stop the client immediately
+        try {
+          loggedInClient.stopClient();
+        } catch (e) {
+          console.warn('Error stopping client:', e);
+        }
+        
+        logout().then(() => {
+          isLoggingOutRef.current = false;
+        }).catch(() => {
+          isLoggingOutRef.current = false;
+        });
+      });
+
+      // Listen for sync errors that indicate session invalidation
+      loggedInClient.on(ClientEvent.Sync, (state, _prevState, data) => {
+        if (state === 'ERROR' && data?.error) {
+          const error = data.error as any;
+          console.error('Sync error:', error);
+          
+          // Check for authentication errors
+          if (error.errcode === 'M_UNKNOWN_TOKEN' || error.httpStatus === 401) {
+            if (isLoggingOutRef.current) return; // Already logging out, skip
+            isLoggingOutRef.current = true;
+            
+            console.error('⚠️ Authentication failed - session was invalidated by another client');
+            
+            // Stop the client immediately to prevent more sync attempts
+            try {
+              loggedInClient.stopClient();
+            } catch (e) {
+              console.warn('Error stopping client:', e);
+            }
+            
+            // Perform logout - React will automatically show login screen
+            logout().then(() => {
+              isLoggingOutRef.current = false;
+            }).catch(() => {
+              isLoggingOutRef.current = false;
+            });
+          } else if (error.httpStatus === 403) {
+            if (isLoggingOutRef.current) return; // Already logging out, skip
+            isLoggingOutRef.current = true;
+            
+            console.error('⚠️ Access forbidden - session may have been revoked');
+            
+            // Stop the client immediately to prevent more sync attempts
+            try {
+              loggedInClient.stopClient();
+            } catch (e) {
+              console.warn('Error stopping client:', e);
+            }
+            
+            // Perform logout - React will automatically show login screen
+            logout().then(() => {
+              isLoggingOutRef.current = false;
+            }).catch(() => {
+              isLoggingOutRef.current = false;
+            });
+          }
+        }
       });
 
       // Store credentials
@@ -480,12 +587,42 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setClient(loggedInClient);
       setIsLoggedIn(true); // Set logged in immediately
       
-      // Start the client with enhanced sync options
+      // Start the client
+      console.log('🚀 Starting Matrix client...');
       await loggedInClient.startClient({ 
         initialSyncLimit: 20, // Load more initial messages
         lazyLoadMembers: true, // Lazy load room members for better performance
       });
+      console.log('✅ Matrix client started with crypto enabled');
       
+      // Helper to check verification status
+      const checkVerificationStatus = async () => {
+        const crypto = loggedInClient.getCrypto();
+        console.log('Checking verification status - Crypto available?', !!crypto);
+        if (crypto) {
+          try {
+            const crossSigningStatus = await crypto.getCrossSigningStatus();
+            console.log('Cross-signing status:', JSON.stringify(crossSigningStatus, null, 2));
+            
+            // If cross-signing is not set up, we need verification
+            if (!crossSigningStatus.publicKeysOnDevice || !crossSigningStatus.privateKeysInSecretStorage) {
+              console.warn('Cross-signing not fully set up - verification needed');
+              setNeedsVerification(true);
+            } else {
+              console.log('✅ Cross-signing is fully set up - no verification needed');
+              setNeedsVerification(false);
+            }
+          } catch (error) {
+            console.error('Error checking cross-signing status:', error);
+            // Assume we need verification if we can't check
+            setNeedsVerification(true);
+          }
+        } else {
+          console.warn('Crypto not available - assuming verification needed');
+          setNeedsVerification(true);
+        }
+      };
+
       // Update rooms when sync completes
       loggedInClient.once(ClientEvent.Sync, async (state) => {
         if (state === 'PREPARED') {
@@ -494,31 +631,19 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           console.log('Sync complete - loaded', allRooms.length, 'rooms/spaces');
           
           // Check if we need to set up cross-signing
-          const crypto = loggedInClient.getCrypto();
-          console.log('Crypto object available?', !!crypto);
-          if (crypto) {
-            try {
-              const crossSigningStatus = await crypto.getCrossSigningStatus();
-              console.log('Cross-signing status:', JSON.stringify(crossSigningStatus, null, 2));
-              
-              // If cross-signing is not set up, we need verification
-              if (!crossSigningStatus.publicKeysOnDevice || !crossSigningStatus.privateKeysInSecretStorage) {
-                console.warn('Cross-signing not fully set up - verification needed');
-                setNeedsVerification(true);
-              } else {
-                console.log('Cross-signing is fully set up');
-                setNeedsVerification(false);
-              }
-            } catch (error) {
-              console.error('Error checking cross-signing status:', error);
-              // Assume we need verification if we can't check
-              setNeedsVerification(true);
-            }
-          } else {
-            console.warn('Crypto not available - assuming verification needed');
-            setNeedsVerification(true);
-          }
+          await checkVerificationStatus();
         }
+      });
+
+      // Listen for crypto events to re-check verification status
+      loggedInClient.on('crypto.devicesUpdated' as any, async () => {
+        console.log('🔄 Devices updated - rechecking verification status');
+        await checkVerificationStatus();
+      });
+
+      loggedInClient.on('crypto.userTrustStatusChanged' as any, async () => {
+        console.log('🔄 User trust status changed - rechecking verification status');
+        await checkVerificationStatus();
       });
 
       // Listen for room updates
@@ -569,6 +694,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         
         // Delete all Matrix-related IndexedDB databases
         const dbNames = [
+          'matrix-js-sdk:store',
           'matrix-js-sdk:crypto',
           'matrix-js-sdk:riot-web-sync',
           `matrix-js-sdk:crypto:${userId}`,
@@ -610,7 +736,8 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setRoomThemeDefaults({});
       setSpaceThemeDefaults({});
       setThemeDefinitions({});
-      localStorage.removeItem('mx_homeserver');
+      // Keep homeserver saved for convenience
+      // localStorage.removeItem('mx_homeserver'); 
       localStorage.removeItem('mx_access_token');
       localStorage.removeItem('mx_user_id');
       localStorage.removeItem('mx_device_id');
@@ -773,21 +900,44 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const startVerification = async () => {
     if (!client) {
       console.error('❌ No client available');
+      alert('Client not available. Please try again.');
       return;
     }
 
     try {
-      const crypto = client.getCrypto();
+      console.log('🔐 Starting verification process...');
+      console.log('Client state:', {
+        isClientStarted: client.clientRunning,
+        syncState: client.getSyncState(),
+      });
+
+      // Wait for crypto to be available (it might not be ready immediately after client start)
+      let crypto = client.getCrypto();
       if (!crypto) {
-        console.error('❌ Crypto not available');
-        alert('Encryption not initialized');
-        return;
+        console.log('⏳ Waiting for crypto to initialize...');
+        
+        // Wait up to 5 seconds for crypto to become available
+        for (let i = 0; i < 10; i++) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          crypto = client.getCrypto();
+          if (crypto) {
+            console.log('✅ Crypto became available');
+            break;
+          }
+        }
+        
+        if (!crypto) {
+          console.error('❌ Crypto not available after waiting');
+          alert('Encryption not initialized yet. Please wait a moment and try again, or restart the app.');
+          return;
+        }
       }
 
       const userId = client.getUserId();
       const deviceId = client.getDeviceId();
       if (!userId) {
         console.error('❌ No user ID');
+        alert('User ID not available');
         return;
       }
 
@@ -807,6 +957,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       
       // Request verification with the user (SDK will automatically exclude this device)
+      console.log('📤 Sending verification request...');
       const request = await crypto.requestOwnUserVerification();
       console.log('✅ Verification request sent:', request);
       
@@ -814,6 +965,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setVerificationRequest(request);
     } catch (error: any) {
       console.error('❌ Error starting verification:', error);
+      console.error('Error stack:', error.stack);
       alert(`Failed to start verification: ${error.message || 'Unknown error'}`);
     }
   };
@@ -833,8 +985,20 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // Get device ID from storage
           const deviceId = localStorage.getItem('mx_device_id');
           
-          // Try sliding sync proxy from storage, or default to homeserver
-          const slidingSyncProxy = localStorage.getItem('mx_sliding_sync_proxy') || homeserver;
+          // Try to get stored sliding sync proxy, or auto-discover it
+          let slidingSyncProxy = localStorage.getItem('mx_sliding_sync_proxy');
+          if (!slidingSyncProxy) {
+            console.log('🔍 No stored sliding sync proxy, attempting to discover...');
+            const discoveredProxy = await discoverSlidingSyncProxy(homeserver);
+            slidingSyncProxy = discoveredProxy || homeserver;
+            
+            // Store it for future use
+            if (discoveredProxy) {
+              localStorage.setItem('mx_sliding_sync_proxy', discoveredProxy);
+            }
+          } else {
+            console.log('📋 Using stored sliding sync proxy:', slidingSyncProxy);
+          }
           
           const clientConfig: any = {
             baseUrl: homeserver,
@@ -842,6 +1006,18 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             userId: userId,
             deviceId: deviceId || undefined,
           };
+
+          // Create IndexedDB stores for caching and crypto (v34 legacy crypto)
+          console.log('📦 Creating IndexedDB stores (restored session)...');
+          const indexedDBStore = new IndexedDBStore({
+            indexedDB: window.indexedDB,
+            dbName: 'matrix-js-sdk:store',
+            workerFactory: undefined,
+          });
+          const cryptoStore = new IndexedDBCryptoStore(window.indexedDB, 'matrix-js-sdk:crypto');
+          
+          clientConfig.store = indexedDBStore;
+          clientConfig.cryptoStore = cryptoStore;
 
           // Try sliding sync first
           let restoredClient: MatrixClient;
@@ -857,42 +1033,61 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             restoredClient = createClient(clientConfig);
           }
           
+          // NOW initialize the store after it's been assigned to the client
+          try {
+            await indexedDBStore.startup();
+            console.log('✅ IndexedDB store initialized (restored session)');
+          } catch (storeError) {
+            console.warn('⚠️ Failed to initialize IndexedDB store, continuing anyway (restored session):', storeError);
+            // Crypto should still work even if store initialization fails
+          }
+          
           // Initialize crypto - this is required for E2EE
           try {
             // Check if Olm is already loaded
-            if (!(window as any).Olm) {
+            const olmExists = (window as any).Olm;
+            const olmIsInitialized = olmExists && typeof olmExists.init === 'function';
+            
+            if (!olmIsInitialized) {
+              console.log('📦 Loading Olm library (restored session)...');
+              
               // Load Olm from public directory (copied by postinstall script)
               const loadOlm = () => new Promise((resolve, reject) => {
                 const script = document.createElement('script');
                 script.src = '/olm.js';
-                script.onload = () => resolve(true);
+                script.onload = () => {
+                  console.log('✅ olm.js script loaded (restored session)');
+                  resolve(true);
+                };
                 script.onerror = () => reject(new Error('Failed to load olm.js'));
                 document.head.appendChild(script);
               });
               
               await loadOlm();
               
-              // olm.js defines a global Olm function, call it to initialize
-              if (typeof (window as any).Olm === 'function') {
-                const OlmInstance = await (window as any).Olm();
+              // Check if Olm needs to be initialized (it's a function) or is already an object
+              const olmAfterLoad = (window as any).Olm;
+              
+              if (typeof olmAfterLoad === 'function') {
+                // Olm is a function, call it to initialize
+                console.log('🔧 Initializing Olm (restored session)...');
+                const OlmInstance = await olmAfterLoad();
                 (window as any).Olm = OlmInstance;
-                console.log('Olm loaded and initialized from /olm.js [restored]');
+                console.log('✅ Olm initialized (restored session)');
+              } else if (typeof olmAfterLoad === 'object' && olmAfterLoad?.init) {
+                // Olm is already initialized as an object
+                console.log('✅ Olm already initialized (restored session)');
               } else {
-                console.error('Olm script loaded but Olm function not found [restored]');
+                console.error('❌ Unexpected Olm state (restored session):', typeof olmAfterLoad);
               }
+            } else {
+              console.log('✅ Olm already available (restored session)');
             }
             
-            // Verify Olm is properly loaded
-            console.log('window.Olm [restored]:', (window as any).Olm);
-            console.log('window.Olm.init [restored]:', (window as any).Olm?.init);
-            
-            // In matrix-js-sdk v19+, crypto is initialized automatically when the client starts
-            // No need to call initCrypto() - it will happen during startClient()
-            console.log('✅ Crypto will be initialized automatically during client start');
-            
-            // Allow sending to unverified devices (like Element does)
-            restoredClient.setGlobalErrorOnUnknownDevices(false);
-            console.log('✅ Crypto configured to allow unverified devices');
+            // In matrix-js-sdk v34, we need to explicitly call initCrypto()
+            console.log('🔐 Initializing legacy crypto (v34, restored session)...');
+            await restoredClient.initCrypto();
+            console.log('✅ Legacy crypto initialized (restored session)');
             
             // Listen for verification requests
             restoredClient.on('crypto.verification.request' as any, (request: any) => {
@@ -906,8 +1101,72 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           
           // Listen for session invalidation (e.g., force logout from another client)
           restoredClient.on('Session.logged_out' as any, () => {
-            console.log('⚠️ Session invalidated - logging out');
-            logout();
+            if (isLoggingOutRef.current) return; // Already logging out, skip
+            isLoggingOutRef.current = true;
+            
+            console.log('⚠️ Session invalidated by server - logging out');
+            
+            // Stop the client immediately
+            try {
+              restoredClient.stopClient();
+            } catch (e) {
+              console.warn('Error stopping client:', e);
+            }
+            
+            logout().then(() => {
+              isLoggingOutRef.current = false;
+            }).catch(() => {
+              isLoggingOutRef.current = false;
+            });
+          });
+
+          // Listen for sync errors that indicate session invalidation
+          restoredClient.on(ClientEvent.Sync, (state, _prevState, data) => {
+            if (state === 'ERROR' && data?.error && mounted) {
+              const error = data.error as any;
+              console.error('Sync error (restored session):', error);
+              
+              // Check for authentication errors
+              if (error.errcode === 'M_UNKNOWN_TOKEN' || error.httpStatus === 401) {
+                if (isLoggingOutRef.current) return; // Already logging out, skip
+                isLoggingOutRef.current = true;
+                
+                console.error('⚠️ Authentication failed - session was invalidated by another client');
+                
+                // Stop the client immediately to prevent more sync attempts
+                try {
+                  restoredClient.stopClient();
+                } catch (e) {
+                  console.warn('Error stopping client:', e);
+                }
+                
+                // Perform logout - React will automatically show login screen
+                logout().then(() => {
+                  isLoggingOutRef.current = false;
+                }).catch(() => {
+                  isLoggingOutRef.current = false;
+                });
+              } else if (error.httpStatus === 403) {
+                if (isLoggingOutRef.current) return; // Already logging out, skip
+                isLoggingOutRef.current = true;
+                
+                console.error('⚠️ Access forbidden - session may have been revoked');
+                
+                // Stop the client immediately to prevent more sync attempts
+                try {
+                  restoredClient.stopClient();
+                } catch (e) {
+                  console.warn('Error stopping client:', e);
+                }
+                
+                // Perform logout - React will automatically show login screen
+                logout().then(() => {
+                  isLoggingOutRef.current = false;
+                }).catch(() => {
+                  isLoggingOutRef.current = false;
+                });
+              }
+            }
           });
 
           if (!mounted) return;
@@ -924,6 +1183,34 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return;
           }
 
+          // Helper to check verification status
+          const checkVerificationStatusRestored = async () => {
+            if (!mounted) return;
+            const crypto = restoredClient.getCrypto();
+            console.log('Checking verification status (restored) - Crypto available?', !!crypto);
+            if (crypto) {
+              try {
+                const crossSigningStatus = await crypto.getCrossSigningStatus();
+                console.log('Cross-signing status (restored):', JSON.stringify(crossSigningStatus, null, 2));
+                
+                // If cross-signing is not set up, we need verification
+                if (!crossSigningStatus.publicKeysOnDevice || !crossSigningStatus.privateKeysInSecretStorage) {
+                  console.warn('Cross-signing not fully set up - verification needed');
+                  setNeedsVerification(true);
+                } else {
+                  console.log('✅ Cross-signing is fully set up - no verification needed');
+                  setNeedsVerification(false);
+                }
+              } catch (error) {
+                console.error('Error checking cross-signing status:', error);
+                setNeedsVerification(true);
+              }
+            } else {
+              console.warn('Crypto not available - assuming verification needed');
+              setNeedsVerification(true);
+            }
+          };
+
           restoredClient.once(ClientEvent.Sync, async (state) => {
             if (state === 'PREPARED' && mounted) {
               const allRooms = restoredClient.getRooms();
@@ -931,31 +1218,19 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               console.log('Session restored - loaded', allRooms.length, 'rooms/spaces');
               
               // Check if we need to set up cross-signing
-              const crypto = restoredClient.getCrypto();
-              console.log('Restored - Crypto object available?', !!crypto);
-              if (crypto && mounted) {
-                try {
-                  const crossSigningStatus = await crypto.getCrossSigningStatus();
-                  console.log('Restored - Cross-signing status:', JSON.stringify(crossSigningStatus, null, 2));
-                  
-                  // If cross-signing is not set up, we need verification
-                  if (!crossSigningStatus.publicKeysOnDevice || !crossSigningStatus.privateKeysInSecretStorage) {
-                    console.warn('Restored - Cross-signing not fully set up - verification needed');
-                    setNeedsVerification(true);
-                  } else {
-                    console.log('Restored - Cross-signing is fully set up');
-                    setNeedsVerification(false);
-                  }
-                } catch (error) {
-                  console.error('Restored - Error checking cross-signing status:', error);
-                  // Assume we need verification if we can't check
-                  setNeedsVerification(true);
-                }
-              } else if (!crypto && mounted) {
-                console.warn('Restored - Crypto not available - assuming verification needed');
-                setNeedsVerification(true);
-              }
+              await checkVerificationStatusRestored();
             }
+          });
+
+          // Listen for crypto events to re-check verification status
+          restoredClient.on('crypto.devicesUpdated' as any, async () => {
+            console.log('🔄 Devices updated (restored) - rechecking verification status');
+            await checkVerificationStatusRestored();
+          });
+
+          restoredClient.on('crypto.userTrustStatusChanged' as any, async () => {
+            console.log('🔄 User trust status changed (restored) - rechecking verification status');
+            await checkVerificationStatusRestored();
           });
 
           restoredClient.on(RoomEvent.Timeline, () => {
@@ -968,7 +1243,11 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         } catch (error) {
           console.error('Failed to restore session:', error);
           if (mounted) {
-            localStorage.clear();
+            // Clear invalid session (keep homeserver and user preferences)
+            localStorage.removeItem('mx_access_token');
+            localStorage.removeItem('mx_user_id');
+            localStorage.removeItem('mx_device_id');
+            localStorage.removeItem('mx_sliding_sync_proxy');
           }
         } finally {
           if (mounted) {

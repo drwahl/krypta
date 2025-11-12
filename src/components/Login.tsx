@@ -10,21 +10,11 @@ const Login: React.FC = () => {
   );
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [slidingSyncProxy, setSlidingSyncProxy] = useState(
-    localStorage.getItem('mx_sliding_sync_proxy') || ''
-  );
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
-    // Save sliding sync proxy if provided
-    if (slidingSyncProxy) {
-      localStorage.setItem('mx_sliding_sync_proxy', slidingSyncProxy);
-    } else {
-      localStorage.removeItem('mx_sliding_sync_proxy');
-    }
     
     try {
       await login(homeserver, username, password);
@@ -108,23 +98,6 @@ const Login: React.FC = () => {
                 placeholder="••••••••"
                 required
               />
-            </div>
-
-            <div>
-              <label htmlFor="slidingSync" className="block text-sm font-medium text-slate-300 mb-2">
-                Sliding Sync Proxy URL (Optional)
-              </label>
-              <input
-                id="slidingSync"
-                type="text"
-                value={slidingSyncProxy}
-                onChange={(e) => setSlidingSyncProxy(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition"
-                placeholder="https://slidingsync.example.com"
-              />
-              <p className="mt-1 text-xs text-slate-400">
-                Leave empty to automatically try your homeserver. Only needed if your homeserver doesn't support sliding sync natively.
-              </p>
             </div>
 
             {error && (

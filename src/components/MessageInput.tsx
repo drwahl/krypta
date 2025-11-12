@@ -3,6 +3,8 @@ import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { Send, Paperclip, Smile } from 'lucide-react';
 import { Room } from 'matrix-js-sdk';
+import data from '@emoji-mart/data';
+import Picker from '@emoji-mart/react';
 
 interface UserSuggestion {
   userId: string;
@@ -24,9 +26,11 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
   const [userSuggestions, setUserSuggestions] = useState<UserSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentionStart, setMentionStart] = useState<number>(-1);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<number>();
   const suggestionsRef = useRef<HTMLDivElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -34,6 +38,107 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [message]);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showEmojiPicker]);
+
+  // Convert emoji shortcodes (like :smile:) to actual emoji
+  const convertShortcodes = (text: string): string => {
+    // Common emoji shortcode mappings
+    const emojiMap: Record<string, string> = {
+      ':smile:': '😊', ':laughing:': '😂', ':blush:': '😊', ':heart:': '❤️',
+      ':grinning:': '😀', ':smiley:': '😃', ':joy:': '😂', ':heart_eyes:': '😍',
+      ':wink:': '😉', ':yum:': '😋', ':stuck_out_tongue:': '😛', ':sunglasses:': '😎',
+      ':smirk:': '😏', ':neutral_face:': '😐', ':expressionless:': '😑', ':confused:': '😕',
+      ':kissing:': '😗', ':kissing_heart:': '😘', ':kissing_smiling_eyes:': '😙',
+      ':stuck_out_tongue_winking_eye:': '😜', ':stuck_out_tongue_closed_eyes:': '😝',
+      ':disappointed:': '😞', ':worried:': '😟', ':angry:': '😠', ':rage:': '😡',
+      ':cry:': '😢', ':persevere:': '😣', ':triumph:': '😤', ':disappointed_relieved:': '😥',
+      ':frowning:': '😦', ':anguished:': '😧', ':fearful:': '😨', ':weary:': '😩',
+      ':sleepy:': '😪', ':tired_face:': '😫', ':grimacing:': '😬', ':sob:': '😭',
+      ':open_mouth:': '😮', ':hushed:': '😯', ':cold_sweat:': '😰', ':scream:': '😱',
+      ':astonished:': '😲', ':flushed:': '😳', ':sleeping:': '😴', ':dizzy_face:': '😵',
+      ':no_mouth:': '😶', ':mask:': '😷', ':smile_cat:': '😸', ':joy_cat:': '😹',
+      ':smiley_cat:': '😺', ':heart_eyes_cat:': '😻', ':smirk_cat:': '😼',
+      ':kissing_cat:': '😽', ':pouting_cat:': '😾', ':crying_cat_face:': '😿',
+      ':scream_cat:': '🙀', ':slightly_frowning_face:': '🙁', ':slightly_smiling_face:': '🙂',
+      ':upside_down_face:': '🙃', ':roll_eyes:': '🙄', ':no_good:': '🙅', ':ok_woman:': '🙆',
+      ':bow:': '🙇', ':see_no_evil:': '🙈', ':hear_no_evil:': '🙉', ':speak_no_evil:': '🙊',
+      ':raising_hand:': '🙋', ':raised_hands:': '🙌', ':person_frowning:': '🙍',
+      ':person_with_pouting_face:': '🙎', ':pray:': '🙏', ':rocket:': '🚀', ':helicopter:': '🚁',
+      ':steam_locomotive:': '🚂', ':railway_car:': '🚃', ':bullettrain_side:': '🚄',
+      ':bullettrain_front:': '🚅', ':train2:': '🚆', ':metro:': '🚇', ':light_rail:': '🚈',
+      ':station:': '🚉', ':tram:': '🚊', ':train:': '🚋', ':bus:': '🚌', ':oncoming_bus:': '🚍',
+      ':trolleybus:': '🚎', ':busstop:': '🚏', ':minibus:': '🚐', ':ambulance:': '🚑',
+      ':fire_engine:': '🚒', ':police_car:': '🚓', ':oncoming_police_car:': '🚔',
+      ':taxi:': '🚕', ':oncoming_taxi:': '🚖', ':car:': '🚗', ':red_car:': '🚗',
+      ':oncoming_automobile:': '🚘', ':blue_car:': '🚙', ':truck:': '🚚',
+      ':articulated_lorry:': '🚛', ':tractor:': '🚜', ':monorail:': '🚝', ':mountain_railway:': '🚞',
+      ':suspension_railway:': '🚟', ':mountain_cableway:': '🚠', ':aerial_tramway:': '🚡',
+      ':ship:': '🚢', ':rowboat:': '🚣', ':speedboat:': '🚤', ':traffic_light:': '🚥',
+      ':vertical_traffic_light:': '🚦', ':construction:': '🚧', ':rotating_light:': '🚨',
+      ':triangular_flag_on_post:': '🚩', ':door:': '🚪', ':no_entry_sign:': '🚫',
+      ':smoking:': '🚬', ':no_smoking:': '🚭', ':bike:': '🚲', ':walking:': '🚶',
+      ':mens:': '🚹', ':womens:': '🚺', ':restroom:': '🚻', ':baby_symbol:': '🚼',
+      ':toilet:': '🚽', ':potable_water:': '🚰', ':put_litter_in_its_place:': '🚮',
+      ':cinema:': '🎦', ':signal_strength:': '📶', ':koko:': '🈁', ':symbols:': '🔣',
+      ':information_source:': 'ℹ️', ':abc:': '🔤', ':abcd:': '🔡', ':capital_abcd:': '🔠',
+      ':ng:': '🆖', ':ok:': '🆗', ':up:': '🆙', ':cool:': '🆒', ':new:': '🆕', ':free:': '🆓',
+      ':+1:': '👍', ':thumbsup:': '👍', ':-1:': '👎', ':thumbsdown:': '👎',
+      ':clap:': '👏', ':wave:': '👋', ':fire:': '🔥', ':100:': '💯', ':tada:': '🎉',
+      ':eyes:': '👀', ':thinking:': '🤔', ':thinking_face:': '🤔', ':shrug:': '🤷',
+      ':facepalm:': '🤦', ':muscle:': '💪', ':star:': '⭐', ':sparkles:': '✨',
+      ':zap:': '⚡', ':boom:': '💥', ':zzz:': '💤', ':sweat_drops:': '💦',
+      ':dash:': '💨', ':notes:': '🎶', ':v:': '✌️', ':ok_hand:': '👌', ':point_left:': '👈',
+      ':point_right:': '👉', ':point_up:': '☝️', ':point_down:': '👇', ':fist:': '✊',
+      ':facepunch:': '👊', ':punch:': '👊',':check_mark:': '✅', ':x:': '❌',
+      ':bangbang:': '‼️', ':question:': '❓', ':grey_question:': '❔', ':grey_exclamation:': '❕',
+      ':exclamation:': '❗', ':heavy_heart_exclamation:': '❣️', ':broken_heart:': '💔',
+      ':two_hearts:': '💕', ':sparkling_heart:': '💖', ':heartpulse:': '💗',
+      ':blue_heart:': '💙', ':green_heart:': '💚', ':yellow_heart:': '💛',
+      ':purple_heart:': '💜', ':gift_heart:': '💝', ':revolving_hearts:': '💞',
+      ':heart_decoration:': '💟', ':diamond_shape_with_a_dot_inside:': '💠',
+      ':bulb:': '💡', ':anger:': '💢', ':bomb:': '💣', ':collision:': '💥',
+      ':droplet:': '💧', ':poop:': '💩',
+      ':shit:': '💩', ':hankey:': '💩', ':poo:': '💩', ':smooch:': '💋', ':smiling:': '☺️',
+    };
+
+    let result = text;
+    for (const [shortcode, emoji] of Object.entries(emojiMap)) {
+      result = result.replace(new RegExp(shortcode, 'g'), emoji);
+    }
+    return result;
+  };
+
+  // Handle emoji selection from picker
+  const handleEmojiSelect = (emoji: any) => {
+    const emojiNative = emoji.native;
+    const cursorPos = textareaRef.current?.selectionStart || message.length;
+    const newMessage = message.slice(0, cursorPos) + emojiNative + message.slice(cursorPos);
+    setMessage(newMessage);
+    setShowEmojiPicker(false);
+    
+    // Focus back on textarea
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      const newCursorPos = cursorPos + emojiNative.length;
+      textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
 
   // Get room members for autocomplete
   const getRoomMembers = (): UserSuggestion[] => {
@@ -148,7 +253,9 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
     if (!message.trim() || !currentRoom) return;
 
     try {
-      await sendMessage(currentRoom.roomId, message);
+      // Convert emoji shortcodes to actual emoji before sending
+      const messageWithEmoji = convertShortcodes(message);
+      await sendMessage(currentRoom.roomId, messageWithEmoji);
       setMessage('');
       
       // Stop typing indicator
@@ -385,27 +492,53 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
         </div>
 
         {!theme.style.compactMode && (
-          <button
-            type="button"
-            className="transition"
-            style={{
-              padding: '0.5rem',
-              borderRadius: 'var(--sizing-borderRadius)',
-              color: 'var(--color-textMuted)',
-              marginBottom: '0.25rem',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
-              e.currentTarget.style.color = 'var(--color-text)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'var(--color-textMuted)';
-            }}
-            title="Add emoji"
-          >
-            <Smile className="w-5 h-5" />
-          </button>
+          <div className="relative" ref={emojiPickerRef}>
+            <button
+              type="button"
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              className="transition"
+              style={{
+                padding: '0.5rem',
+                borderRadius: 'var(--sizing-borderRadius)',
+                color: showEmojiPicker ? 'var(--color-primary)' : 'var(--color-textMuted)',
+                backgroundColor: showEmojiPicker ? 'var(--color-hover)' : 'transparent',
+                marginBottom: '0.25rem',
+              }}
+              onMouseEnter={(e) => {
+                if (!showEmojiPicker) {
+                  e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                  e.currentTarget.style.color = 'var(--color-text)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!showEmojiPicker) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = 'var(--color-textMuted)';
+                }
+              }}
+              title="Add emoji"
+            >
+              <Smile className="w-5 h-5" />
+            </button>
+            
+            {showEmojiPicker && (
+              <div 
+                className="absolute bottom-full mb-2 right-0 z-50"
+                style={{
+                  borderRadius: 'var(--sizing-borderRadius)',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                }}
+              >
+                <Picker 
+                  data={data} 
+                  onEmojiSelect={handleEmojiSelect}
+                  theme={theme.name === 'dark' || theme.name === 'terminal' ? 'dark' : 'light'}
+                  previewPosition="none"
+                  skinTonePosition="none"
+                />
+              </div>
+            )}
+          </div>
         )}
 
         <button
@@ -447,7 +580,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
             color: 'var(--color-textMuted)',
           }}
         >
-          <span className="font-medium">@username</span> to mention • <span className="font-medium">Tab</span> to autocomplete • <span className="font-medium">Shift + Enter</span> for new line • <span className="font-medium">Enter</span> to send
+          <span className="font-medium">@username</span> to mention • <span className="font-medium">:emoji:</span> for emoji (e.g. :laughing: :heart: :fire:) • <span className="font-medium">Tab</span> to autocomplete • <span className="font-medium">Enter</span> to send
         </div>
       )}
     </div>

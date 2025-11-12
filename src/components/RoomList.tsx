@@ -2,11 +2,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useMultiRoom } from '../contexts/MultiRoomContext';
-import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical, Settings as SettingsIcon } from 'lucide-react';
+import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical, Settings as SettingsIcon, Bell, BellOff, Plus } from 'lucide-react';
 import { Room, MatrixClient } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import Settings from './Settings';
 import Invites from './Invites';
+import CreateRoom from './CreateRoom';
 import { SortMode } from './SortSelector';
 import { Theme } from '../themeTypes';
 
@@ -189,6 +190,12 @@ const RoomListComponent: React.FC = () => {
     return stored ? new Set(JSON.parse(stored)) : new Set();
   });
   
+  // Persist muted spaces
+  const [mutedSpaces, setMutedSpaces] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem('nychatt_muted_spaces');
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  });
+  
   // Persist orphan rooms expanded state (default to false/collapsed)
   const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(() => {
     const stored = localStorage.getItem('nychatt_orphan_rooms_expanded');
@@ -196,6 +203,9 @@ const RoomListComponent: React.FC = () => {
   });
   
   const [showSettings, setShowSettings] = useState(false);
+  const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; spaceId: string } | null>(null);
+  const [createRoomInSpace, setCreateRoomInSpace] = useState<string | null>(null);
   
   // Sort mode
   const [sortMode, setSortMode] = useState<SortMode>(() => {
@@ -220,6 +230,15 @@ const RoomListComponent: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('room_sort_mode', sortMode);
   }, [sortMode]);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClickOutside = () => setContextMenu(null);
+    if (contextMenu) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [contextMenu]);
   
   // Persist expanded spaces
   useEffect(() => {
@@ -230,6 +249,11 @@ const RoomListComponent: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('nychatt_orphan_rooms_expanded', JSON.stringify(isOrphanRoomsExpanded));
   }, [isOrphanRoomsExpanded]);
+  
+  // Persist muted spaces
+  useEffect(() => {
+    localStorage.setItem('nychatt_muted_spaces', JSON.stringify(Array.from(mutedSpaces)));
+  }, [mutedSpaces]);
   
   // Persist custom orders
   useEffect(() => {
@@ -248,6 +272,19 @@ const RoomListComponent: React.FC = () => {
       newExpanded.add(spaceId);
     }
     setExpandedSpaces(newExpanded);
+  };
+
+  const toggleMuteSpace = (spaceId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation(); // Prevent space expansion/collapse
+    }
+    const newMuted = new Set(mutedSpaces);
+    if (newMuted.has(spaceId)) {
+      newMuted.delete(spaceId);
+    } else {
+      newMuted.add(spaceId);
+    }
+    setMutedSpaces(newMuted);
   };
 
   // Helper function for activity-based sorting
@@ -469,26 +506,48 @@ const RoomListComponent: React.FC = () => {
           >
             {theme.style.compactMode ? '> NyChatt' : 'NyChatt'}
           </h2>
-          <button
-            onClick={logout}
-            className="transition"
-            style={{
-              padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
-              borderRadius: 'var(--sizing-borderRadius)',
-              color: 'var(--color-textMuted)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
-              e.currentTarget.style.color = 'var(--color-text)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'var(--color-textMuted)';
-            }}
-            title="Logout"
-          >
-            <LogOut style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
-          </button>
+          <div className="flex items-center" style={{ gap: '0.5rem' }}>
+            <button
+              onClick={() => setShowCreateRoom(true)}
+              className="transition"
+              style={{
+                padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
+                borderRadius: 'var(--sizing-borderRadius)',
+                color: 'var(--color-textMuted)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                e.currentTarget.style.color = 'var(--color-text)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--color-textMuted)';
+              }}
+              title="Create Room"
+            >
+              <Plus style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
+            </button>
+            <button
+              onClick={logout}
+              className="transition"
+              style={{
+                padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
+                borderRadius: 'var(--sizing-borderRadius)',
+                color: 'var(--color-textMuted)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                e.currentTarget.style.color = 'var(--color-text)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--color-textMuted)';
+              }}
+              title="Logout"
+            >
+              <LogOut style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
+            </button>
+          </div>
         </div>
 
         {/* Search */}
@@ -646,6 +705,7 @@ const RoomListComponent: React.FC = () => {
               const spaceRooms = roomsInSpaces.get(space.roomId) || [];
               const filteredSpaceRooms = filterRooms(spaceRooms);
               const isExpanded = expandedSpaces.has(space.roomId);
+              const isMuted = mutedSpaces.has(space.roomId);
               const totalUnread = spaceRooms.reduce((sum, room) => sum + (getUnreadCount(room) || 0), 0);
               const isDraggingSpace = draggedItem?.type === 'space' && draggedItem.id === space.roomId;
 
@@ -663,6 +723,21 @@ const RoomListComponent: React.FC = () => {
                   {/* Space header */}
                   <button
                     onClick={() => toggleSpace(space.roomId)}
+                    onContextMenu={(e) => {
+                      // If context menu is already open, close it and show default menu
+                      if (contextMenu && contextMenu.spaceId === space.roomId) {
+                        setContextMenu(null);
+                        return; // Don't prevent default, allow browser menu
+                      }
+                      
+                      // First right-click: show our custom menu
+                      e.preventDefault();
+                      setContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        spaceId: space.roomId,
+                      });
+                    }}
                     draggable={sortMode === 'custom'}
                     onDragStart={(e) => handleDragStart(e, 'space', space.roomId)}
                     onDragOver={handleDragOver}
@@ -670,7 +745,7 @@ const RoomListComponent: React.FC = () => {
                     onDragEnd={handleDragEnd}
                     className="w-full px-4 py-2 flex items-center gap-2 hover:bg-slate-700/30 transition group"
                     style={{
-                      opacity: isDraggingSpace ? 0.5 : 1,
+                      opacity: isDraggingSpace ? 0.5 : (isMuted ? 0.6 : 1),
                       cursor: sortMode === 'custom' ? 'grab' : 'pointer',
                     }}
                   >
@@ -727,7 +802,35 @@ const RoomListComponent: React.FC = () => {
                       </p>
                     </div>
                     <span className="text-xs text-slate-500">({filteredSpaceRooms.length})</span>
-                    {totalUnread > 0 && (
+                    
+                    {/* Mute/Unmute button */}
+                    <button
+                      onClick={(e) => toggleMuteSpace(space.roomId, e)}
+                      className="flex-shrink-0 p-1 rounded transition"
+                      style={{
+                        color: isMuted ? 'var(--color-textMuted)' : 'var(--color-text)',
+                        opacity: isMuted ? 1 : 0,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                        e.currentTarget.style.opacity = '1';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        if (!isMuted) {
+                          e.currentTarget.style.opacity = '0';
+                        }
+                      }}
+                      title={isMuted ? 'Unmute space' : 'Mute space'}
+                    >
+                      {isMuted ? (
+                        <BellOff className="w-4 h-4" />
+                      ) : (
+                        <Bell className="w-4 h-4" />
+                      )}
+                    </button>
+                    
+                    {totalUnread > 0 && !isMuted && (
                       <div className="bg-primary-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">
                         {totalUnread > 9 ? '9+' : totalUnread}
                       </div>
@@ -736,7 +839,7 @@ const RoomListComponent: React.FC = () => {
 
                   {/* Space rooms (when expanded) */}
                   {isExpanded && (
-                    <div>
+                    <div style={{ opacity: isMuted ? 0.6 : 1 }}>
                       {sortRoomsInSpace(filteredSpaceRooms, space.roomId).map((room) => (
                         <RoomItem 
                           key={room.roomId} 
@@ -793,6 +896,67 @@ const RoomListComponent: React.FC = () => {
         sortMode={sortMode}
         onSortChange={setSortMode}
       />
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+            backgroundColor: 'var(--color-bgSecondary)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--sizing-borderRadius)',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            zIndex: 1000,
+            minWidth: '200px',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              setCreateRoomInSpace(contextMenu.spaceId);
+              setContextMenu(null);
+            }}
+            className="w-full text-left transition flex items-center"
+            style={{
+              padding: '0.75rem 1rem',
+              gap: '0.75rem',
+              color: 'var(--color-text)',
+              fontSize: 'var(--sizing-textSm)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <Plus className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+            <span>Create Room in Space</span>
+          </button>
+        </div>
+      )}
+
+      {/* Create Room Modal */}
+      {(showCreateRoom || createRoomInSpace) && (
+        <CreateRoom
+          onClose={() => {
+            setShowCreateRoom(false);
+            setCreateRoomInSpace(null);
+          }}
+          onRoomCreated={(roomId) => {
+            // Optionally open the newly created room
+            const newRoom = rooms.find(r => r.roomId === roomId);
+            if (newRoom) {
+              addRoom(newRoom);
+            }
+            setShowCreateRoom(false);
+            setCreateRoomInSpace(null);
+          }}
+          parentSpaceId={createRoomInSpace || undefined}
+        />
+      )}
     </div>
   );
 };
