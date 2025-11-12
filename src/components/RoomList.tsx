@@ -202,6 +202,12 @@ const RoomListComponent: React.FC = () => {
     return stored ? JSON.parse(stored) : false;
   });
   
+  // Persist expanded space members
+  const [expandedSpaceMembers, setExpandedSpaceMembers] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem('nychatt_expanded_space_members');
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  });
+  
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; spaceId: string } | null>(null);
@@ -272,6 +278,21 @@ const RoomListComponent: React.FC = () => {
       newExpanded.add(spaceId);
     }
     setExpandedSpaces(newExpanded);
+    localStorage.setItem('nychatt_expanded_spaces', JSON.stringify(Array.from(newExpanded)));
+  };
+
+  const toggleSpaceMembers = (spaceId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation(); // Prevent space expansion/collapse
+    }
+    const newExpanded = new Set(expandedSpaceMembers);
+    if (newExpanded.has(spaceId)) {
+      newExpanded.delete(spaceId);
+    } else {
+      newExpanded.add(spaceId);
+    }
+    setExpandedSpaceMembers(newExpanded);
+    localStorage.setItem('nychatt_expanded_space_members', JSON.stringify(Array.from(newExpanded)));
   };
 
   const toggleMuteSpace = (spaceId: string, e?: React.MouseEvent) => {
@@ -527,26 +548,26 @@ const RoomListComponent: React.FC = () => {
             >
               <Plus style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
             </button>
-            <button
-              onClick={logout}
-              className="transition"
-              style={{
-                padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
-                borderRadius: 'var(--sizing-borderRadius)',
-                color: 'var(--color-textMuted)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--color-hover)';
-                e.currentTarget.style.color = 'var(--color-text)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = 'var(--color-textMuted)';
-              }}
-              title="Logout"
-            >
-              <LogOut style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
-            </button>
+          <button
+            onClick={logout}
+            className="transition"
+            style={{
+              padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
+              borderRadius: 'var(--sizing-borderRadius)',
+              color: 'var(--color-textMuted)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+              e.currentTarget.style.color = 'var(--color-text)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--color-textMuted)';
+            }}
+            title="Logout"
+          >
+            <LogOut style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
+          </button>
           </div>
         </div>
 
@@ -767,29 +788,29 @@ const RoomListComponent: React.FC = () => {
                       <ChevronRight className="w-4 h-4 text-slate-400" />
                     )}
                     {spaceAvatarUrl ? (
-                      <img
-                        src={spaceAvatarUrl}
-                        alt={space.name}
-                        className="rounded-md flex-shrink-0 object-cover"
-                        style={{
+                        <img
+                          src={spaceAvatarUrl}
+                          alt={space.name}
+                          className="rounded-md flex-shrink-0 object-cover"
+                          style={{
                           width: theme.style.compactMode ? '0.875rem' : '1.25rem',
                           height: theme.style.compactMode ? '0.875rem' : '1.25rem',
                           borderRadius: theme.style.compactMode ? '2px' : '4px',
-                        }}
-                      />
-                    ) : (
-                      <div 
+                          }}
+                        />
+                      ) : (
+                        <div 
                         className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
-                        style={{
+                          style={{
                           width: theme.style.compactMode ? '0.875rem' : '1.25rem',
                           height: theme.style.compactMode ? '0.875rem' : '1.25rem',
                           borderRadius: theme.style.compactMode ? '2px' : '4px',
                           fontSize: theme.style.compactMode ? '0.45rem' : '0.625rem',
                           color: 'var(--color-text)',
-                        }}
-                      >
-                        {spaceInitials}
-                      </div>
+                          }}
+                        >
+                          {spaceInitials}
+                        </div>
                     )}
                     <div className="flex-1 min-w-0 text-left">
                       <p 
@@ -859,6 +880,134 @@ const RoomListComponent: React.FC = () => {
                           onDragEnd={handleDragEnd}
                         />
                       ))}
+                      
+                      {/* Space members toggle */}
+                      {(() => {
+                        const members = space.getJoinedMembers();
+                        const isMembersExpanded = expandedSpaceMembers.has(space.roomId);
+                        
+                        if (members.length > 0) {
+                          return (
+                            <>
+                              <button
+                                onClick={(e) => toggleSpaceMembers(space.roomId, e)}
+                                className="w-full flex items-center transition"
+                                style={{
+                                  padding: theme.style.compactMode ? '0.25rem 1rem 0.25rem 2rem' : '0.5rem 1rem 0.5rem 2.5rem',
+                                  gap: '0.5rem',
+                                  color: 'var(--color-textMuted)',
+                                  fontSize: 'var(--sizing-textSm)',
+                                  backgroundColor: 'transparent',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'transparent';
+                                }}
+                              >
+                                {isMembersExpanded ? (
+                                  <ChevronDown className="w-3 h-3" />
+                                ) : (
+                                  <ChevronRight className="w-3 h-3" />
+                                )}
+                                <Users className="w-3 h-3" />
+                                <span>Members ({members.length})</span>
+                              </button>
+                              
+                              {isMembersExpanded && members.map((member) => {
+                                const memberUser = member.user;
+                                if (!memberUser) return null;
+                                
+                                const displayName = memberUser.displayName || member.userId;
+                                const avatarUrl = memberUser.avatarUrl 
+                                  ? client?.mxcUrlToHttp(memberUser.avatarUrl, 32, 32, 'crop') || undefined
+                                  : undefined;
+                                
+                                return (
+                                  <button
+                                    key={member.userId}
+                                    onClick={async () => {
+                                      if (!client) return;
+                                      // Find existing DM or create one
+                                      const existingDm = rooms.find(r => {
+                                        const members = r.getJoinedMembers();
+                                        return members.length === 2 && 
+                                               members.some(m => m.userId === member.userId);
+                                      });
+                                      
+                                      if (existingDm) {
+                                        addRoom(existingDm);
+                                      } else {
+                                        // Create new DM
+                                        try {
+                                          const { room_id } = await client.createRoom({
+                                            visibility: 'private',
+                                            preset: 'trusted_private_chat',
+                                            is_direct: true,
+                                            invite: [member.userId],
+                                          });
+                                          
+                                          // Wait a moment for the room to sync
+                                          setTimeout(() => {
+                                            const newRoom = rooms.find(r => r.roomId === room_id);
+                                            if (newRoom) {
+                                              addRoom(newRoom);
+                                            }
+                                          }, 500);
+                                        } catch (error) {
+                                          console.error('Failed to create DM:', error);
+                                        }
+                                      }
+                                    }}
+                                    className="w-full flex items-center transition"
+                                    style={{
+                                      padding: theme.style.compactMode ? '0.25rem 1rem 0.25rem 3rem' : '0.5rem 1rem 0.5rem 3.5rem',
+                                      gap: '0.5rem',
+                                      color: 'var(--color-text)',
+                                      fontSize: 'var(--sizing-textSm)',
+                                      backgroundColor: 'transparent',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = 'transparent';
+                                    }}
+                                    title={`Chat with ${displayName}`}
+                                  >
+                                    {avatarUrl ? (
+                                      <img
+                                        src={avatarUrl}
+                                        alt={displayName}
+                                        className="rounded-full flex-shrink-0 object-cover"
+                                        style={{
+                                          width: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                                          height: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                                        }}
+                                      />
+                                    ) : (
+                                      <div 
+                                        className="rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
+                                        style={{
+                                          width: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                                          height: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                                          fontSize: theme.style.compactMode ? '0.4rem' : '0.5rem',
+                                          color: 'var(--color-text)',
+                                        }}
+                                      >
+                                        {displayName.substring(0, 2).toUpperCase()}
+                                      </div>
+                                    )}
+                                    <span className="truncate">{displayName}</span>
+                                  </button>
+                                );
+                              })}
+                            </>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   )}
                 </div>
