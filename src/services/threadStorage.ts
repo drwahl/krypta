@@ -50,12 +50,18 @@ export class ThreadStorage {
       const transaction = this.db!.transaction([this.storeName], 'readwrite');
       const store = transaction.objectStore(this.storeName);
 
-      // Convert Sets to Arrays for storage
+      // Convert Sets and Maps to Arrays, and strip non-serializable properties
+      const messagesArray = Array.from(thread.messages.entries()).map(([id, msg]) => {
+        // Remove matrixEvent as it contains non-serializable event emitters
+        const { matrixEvent, ...serializableMsg } = msg;
+        return [id, serializableMsg];
+      });
+
       const threadData = {
         ...thread,
         participants: Array.from(thread.participants),
         relatedThreadIds: Array.from(thread.relatedThreadIds),
-        messages: Array.from(thread.messages.entries()),
+        messages: messagesArray,
         branches: Array.from(thread.branches.entries()),
       };
 

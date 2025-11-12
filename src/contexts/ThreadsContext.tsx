@@ -32,6 +32,7 @@ interface ThreadsContextType {
   getRelatedThreads: (threadId: string) => Thread[];
   archiveThread: (threadId: string) => boolean;
   deleteThread: (threadId: string) => Promise<boolean>;
+  updateThreadTitle: (threadId: string, newTitle: string) => Promise<boolean>;
   getThreadsInRoom: (roomId: string) => Thread[];
   threadManager: ThreadManager | null;
   threadLinker: ThreadLinker | null;
@@ -96,21 +97,40 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const matrixThreads = threadSyncRef.current.loadThreadsFromRoom(currentRoom);
         const metadata = threadSyncRef.current.loadAllThreadMetadata(currentRoom);
         
-        console.log(`📊 Found ${matrixThreads.size} Matrix threads, ${metadata.size} with metadata`);
+        // Load custom thread titles from room account data (per-user)
+        const threadTitlesEvent = currentRoom.getAccountData('com.nychatt.thread_titles');
+        const threadTitles = threadTitlesEvent?.getContent() || {};
+        
+        console.log(`📊 Found ${matrixThreads.size} Matrix threads`);
+        console.log(`📊 Found ${metadata.size} thread metadata state events`);
+        console.log(`📊 Found ${Object.keys(threadTitles).length} custom titles in account data`);
+        
+        // Log custom titles
+        if (Object.keys(threadTitles).length > 0) {
+          console.log(`📋 Custom thread titles from account data:`);
+          Object.entries(threadTitles).forEach(([threadId, data]: [string, any]) => {
+            console.log(`   ${threadId}: "${data.title || data}"`);
+          });
+        }
         
         // Convert Matrix threads to our Thread objects
         const loadedThreads: Thread[] = [];
         for (const [rootEventId, events] of matrixThreads.entries()) {
+          // Get metadata from room state
+          const meta = metadata.get(rootEventId);
+          
           // Check if we already have this thread
           let thread = threadManagerRef.current.getThread(rootEventId);
           
           if (!thread) {
-            // Get metadata from room state
-            const meta = metadata.get(rootEventId);
             const rootEvent = threadSyncRef.current.getThreadRoot(currentRoom, rootEventId);
             
-            const title = meta?.title || 'Untitled Thread';
+            // Priority: custom title from account data > metadata from state > default
+            const customTitle = threadTitles[rootEventId];
+            const title = (customTitle?.title || customTitle) || meta?.title || 'Untitled Thread';
             const description = meta?.description;
+            
+            console.log(`   Creating thread ${rootEventId} with title: "${title}"`);
             
             // Create thread with Matrix event ID
             thread = threadManagerRef.current.createThread(
@@ -135,6 +155,29 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
             }
             
             loadedThreads.push(thread);
+          } else {
+            // Update existing thread with custom titles from account data or metadata
+            const customTitle = threadTitles[rootEventId];
+            const newTitle = (customTitle?.title || customTitle) || meta?.title;
+            
+            if (newTitle && newTitle !== thread.title) {
+              console.log(`🔄 Updating existing thread ${rootEventId}`);
+              console.log(`   Old title: "${thread.title}"`);
+              console.log(`   New title: "${newTitle}"`);
+              
+              thread.title = newTitle;
+              thread.description = meta?.description || thread.description;
+              if (meta?.updated_at || customTitle?.updated_at) {
+                thread.updatedAt = meta?.updated_at || customTitle?.updated_at;
+              }
+              
+              // Trigger state update
+              setThreads((prev) => 
+                prev.map((t) => (t.id === rootEventId ? { ...thread } : t))
+              );
+              
+              console.log(`   ✅ Thread updated`);
+            }
           }
         }
         
@@ -148,6 +191,49 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     initializeThreading();
   }, [client, currentRoom]);
   
+  // Listen for state events (including thread metadata updates)
+  useEffect(() => {
+    if (!client || !currentRoom) return;
+    
+    const handleRoomState = (event: any) => {
+      // Check if this is a thread metadata update
+      if (event.getType() === 'com.nychatt.thread.metadata') {
+        const stateKey = event.getStateKey();
+        const content = event.getContent();
+        console.log(`🔔 Thread metadata state event received!`);
+        console.log(`   Thread ID: ${stateKey}`);
+        console.log(`   New title: ${content.title}`);
+        console.log(`   Updated by: ${content.updated_by}`);
+        console.log(`   Content:`, content);
+        
+        // Update the thread if we have it
+        if (threadManagerRef.current) {
+          const thread = threadManagerRef.current.getThread(stateKey);
+          if (thread) {
+            console.log(`   Updating local thread object...`);
+            thread.title = content.title;
+            thread.updatedAt = content.updated_at;
+            
+            // Update React state
+            setThreads((prev) => 
+              prev.map((t) => (t.id === stateKey ? { ...t, title: content.title, updatedAt: content.updated_at } : t))
+            );
+            console.log(`   ✅ Thread updated locally`);
+          } else {
+            console.log(`   ⚠️ Thread not found in manager`);
+          }
+        }
+      }
+    };
+    
+    // Listen for state events
+    client.on('RoomState.events' as any, handleRoomState);
+    
+    return () => {
+      client.removeListener('RoomState.events' as any, handleRoomState);
+    };
+  }, [client, currentRoom]);
+
   // Listen for new messages in Matrix and auto-add to threads
   useEffect(() => {
     if (!client || !threadManagerRef.current || !threadSyncRef.current) return;
@@ -540,6 +626,103 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [threadManager, selectedThread]
   );
 
+  const updateThreadTitle = useCallback(
+    async (threadId: string, newTitle: string) => {
+      if (!threadManager || !currentRoom) {
+        console.error('❌ Missing threadManager or currentRoom');
+        return false;
+      }
+      
+      console.log(`✏️ Updating thread title: ${threadId} -> "${newTitle}"`);
+      const thread = threadManager.getThread(threadId);
+      
+      if (!thread) {
+        console.error(`❌ Thread not found: ${threadId}`);
+        return false;
+      }
+      
+      console.log(`📝 Thread rootEventId: ${thread.rootEventId}`);
+      
+      // Update the thread title
+      thread.title = newTitle.trim();
+      thread.updatedAt = Date.now();
+      
+      // Update in React state
+      setThreads((prev) => 
+        prev.map((t) => (t.id === threadId ? { ...t, title: newTitle.trim(), updatedAt: Date.now() } : t))
+      );
+      
+      // Update selected thread if it's the one being edited
+      if (selectedThread?.id === threadId) {
+        setSelectedThread({ ...thread });
+      }
+      
+      // Persist to IndexedDB
+      if (storageRef.current) {
+        try {
+          await storageRef.current.saveThread(thread);
+          console.log(`✅ Thread title updated in IndexedDB`);
+        } catch (error) {
+          console.error('❌ Failed to save to IndexedDB:', error);
+          return false;
+        }
+      }
+      
+      // Sync to Matrix room account data (per-user, doesn't require elevated permissions)
+      if (client && currentRoom) {
+        try {
+          console.log(`📤 Saving thread title to Matrix room account data...`);
+          
+          // Get existing thread titles for this room
+          const existingEvent = currentRoom.getAccountData('com.nychatt.thread_titles');
+          const existingData = existingEvent?.getContent() || {};
+          
+          console.log(`📋 Existing thread titles:`, existingData);
+          
+          // Update with new title
+          const updatedData = {
+            ...existingData,
+            [thread.rootEventId]: {
+              title: newTitle.trim(),
+              updated_at: Date.now()
+            }
+          };
+          
+          console.log(`📤 Saving to room account data:`, updatedData);
+          
+          // Save to room account data - any user can do this for themselves
+          await client.setRoomAccountData(
+            currentRoom.roomId,
+            'com.nychatt.thread_titles',
+            updatedData
+          );
+          
+          console.log(`✅ Thread title synced to Matrix room account data (per-user)`);
+          
+          // Verify it was saved
+          setTimeout(() => {
+            const verifyEvent = currentRoom.getAccountData('com.nychatt.thread_titles');
+            const verifyData = verifyEvent?.getContent();
+            console.log(`✔️ Verification - account data:`, verifyData);
+          }, 100);
+          
+        } catch (error) {
+          console.error('❌ Failed to sync thread title to Matrix:', error);
+          console.error(error);
+          // Don't fail - local update still succeeded
+        }
+      } else {
+        console.warn('⚠️ No client or currentRoom available for Matrix sync');
+      }
+      
+      // Trigger update
+      setUpdateTrigger((prev) => prev + 1);
+      
+      return true;
+    },
+    [threadManager, selectedThread, currentRoom, client]
+  );
+
   const getThreadsInRoom = useCallback(
     (roomId: string) => {
       if (!threadManager) return [];
@@ -568,6 +751,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     getRelatedThreads,
     archiveThread,
     deleteThread,
+    updateThreadTitle,
     getThreadsInRoom,
     threadManager,
     threadLinker,

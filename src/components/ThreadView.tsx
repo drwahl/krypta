@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useThreads } from '../contexts/ThreadsContext';
 import { useMatrix } from '../MatrixContext';
 import { Thread, ThreadMessage, ThreadBranch } from '../types/thread';
-import { ChevronDown, ChevronRight, Tag, Users, MessageSquare, Zap, Archive, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Tag, Users, MessageSquare, Zap, Archive, Trash2, Edit2, Check, X as XIcon, Info } from 'lucide-react';
 import ThreadMessageInput from './ThreadMessageInput';
 import MessageMetadataModal from './MessageMetadataModal';
+import ThreadMetadataModal from './ThreadMetadataModal';
 import { MatrixEvent } from 'matrix-js-sdk';
 
 /**
@@ -25,6 +26,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
     summarizeThread,
     archiveThread,
     deleteThread,
+    updateThreadTitle,
     threadManager,
   } = useThreads();
   const { client, currentRoom } = useMatrix();
@@ -39,6 +41,10 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
   const [refreshKey, setRefreshKey] = useState(0);
   const [localThread, setLocalThread] = useState<Thread>(initialThread);
   const [selectedMessageEvent, setSelectedMessageEvent] = useState<MatrixEvent | null>(null);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState(initialThread.title);
+  const [showMetadata, setShowMetadata] = useState(false);
 
   // Update local thread when refreshKey changes
   useEffect(() => {
@@ -87,6 +93,13 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
       client.removeListener('Room.timeline' as any, handleTimeline);
     };
   }, [client, currentRoom]);
+
+  // Scroll to bottom when thread changes or messages update
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [thread.id, thread.messages.size]);
 
   // Load analysis on mount and when refreshKey changes
   useEffect(() => {
@@ -141,6 +154,26 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
       console.log(`🗑️ Thread deleted, closing view`);
       onClose?.();
     }
+  };
+
+  const handleSaveTitle = async () => {
+    if (editedTitle.trim()) {
+      const success = await updateThreadTitle(thread.id, editedTitle.trim());
+      if (success) {
+        setIsEditingTitle(false);
+        // Reload analysis to show updated metadata
+        setRefreshKey((prev) => prev + 1);
+        console.log(`✅ Thread title updated successfully`);
+      } else {
+        console.error(`❌ Failed to update thread title`);
+        setIsEditingTitle(false);
+      }
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditedTitle(thread.title);
+    setIsEditingTitle(false);
   };
 
   const renderMessage = (message: ThreadMessage) => {
@@ -242,19 +275,64 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
     <div className="flex flex-col h-full w-full bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
       {/* Header */}
       <div className="p-2 border-b border-slate-700 flex-shrink-0 overflow-y-auto max-h-20">
-        <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-base font-bold text-white truncate">{thread.title}</h2>
-          </div>
-          {onClose && (
+        {isEditingTitle ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={editedTitle}
+              onChange={(e) => setEditedTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveTitle();
+                if (e.key === 'Escape') handleCancelEdit();
+              }}
+              className="flex-1 px-2 py-1 bg-slate-700 text-white text-sm rounded border border-slate-600 focus:border-primary-500 focus:outline-none"
+              placeholder="Thread title"
+              autoFocus
+            />
             <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2"
+              onClick={handleSaveTitle}
+              className="p-1 text-green-400 hover:text-green-300 transition flex-shrink-0"
+              title="Save"
             >
-              ✕
+              <Check className="w-4 h-4" />
             </button>
-          )}
-        </div>
+            <button
+              onClick={handleCancelEdit}
+              className="p-1 text-red-400 hover:text-red-300 transition flex-shrink-0"
+              title="Cancel"
+            >
+              <XIcon className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 min-w-0 flex items-center gap-2">
+              <h2 className="text-base font-bold text-white truncate flex-1">{thread.title}</h2>
+              <button
+                onClick={() => setIsEditingTitle(true)}
+                className="p-1 text-slate-400 hover:text-white transition flex-shrink-0"
+                title="Edit title"
+              >
+                <Edit2 className="w-3 h-3" />
+              </button>
+            </div>
+            <button
+              onClick={() => setShowMetadata(true)}
+              className="p-1 text-slate-400 hover:text-white transition flex-shrink-0"
+              title="Thread metadata"
+            >
+              <Info className="w-4 h-4" />
+            </button>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="text-slate-400 hover:text-white transition flex-shrink-0"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Metadata - Ultra Compact */}
         {analysis && (
@@ -343,6 +421,9 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
             <p className="text-sm text-slate-300 whitespace-pre-wrap">{summary}</p>
           </div>
         )}
+        
+        {/* Scroll anchor */}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Message Input */}
@@ -382,6 +463,19 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
           Delete
         </button>
       </div>
+
+      {/* Thread Metadata Modal */}
+      <ThreadMetadataModal
+        thread={showMetadata ? thread : null}
+        analysis={analysis}
+        onClose={() => setShowMetadata(false)}
+      />
+
+      {/* Message Metadata Modal */}
+      <MessageMetadataModal
+        event={selectedMessageEvent}
+        onClose={() => setSelectedMessageEvent(null)}
+      />
     </div>
   );
 };
