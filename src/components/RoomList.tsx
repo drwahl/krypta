@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useMultiRoom } from '../contexts/MultiRoomContext';
@@ -18,7 +18,7 @@ interface RoomItemProps {
   spaceId?: string;
   client: MatrixClient | null;
   theme: Theme;
-  openRooms: Room[];
+  isOpen: boolean; // Changed from openRooms array to boolean
   activeRoomId: string | null;
   draggedItem: { type: 'space' | 'room'; id: string; spaceId?: string } | null;
   sortMode: SortMode;
@@ -35,7 +35,7 @@ const RoomItem: React.FC<RoomItemProps> = React.memo(({
   spaceId,
   client,
   theme,
-  openRooms,
+  isOpen, // Now a boolean prop
   activeRoomId,
   draggedItem,
   sortMode,
@@ -45,7 +45,7 @@ const RoomItem: React.FC<RoomItemProps> = React.memo(({
   onDrop,
   onDragEnd,
 }) => {
-  const isOpen = openRooms.some(r => r.roomId === room.roomId);
+  // isOpen is now passed as a prop instead of calculated here
   const isActive = activeRoomId === room.roomId;
   const unreadCount = room.getUnreadNotificationCount();
   const isDragging = draggedItem?.type === 'room' && draggedItem.id === room.roomId;
@@ -402,20 +402,20 @@ const RoomListComponent: React.FC = () => {
   };
   
   // Drag and drop handlers
-  const handleDragStart = (e: React.DragEvent, type: 'space' | 'room', id: string, spaceId?: string) => {
+  const handleDragStart = useCallback((e: React.DragEvent, type: 'space' | 'room', id: string, spaceId?: string) => {
     if (sortMode !== 'custom') return;
     
     setDraggedItem({ type, id, spaceId });
     e.dataTransfer.effectAllowed = 'move';
-  };
+  }, [sortMode]);
   
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     if (sortMode !== 'custom') return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-  };
+  }, [sortMode]);
   
-  const handleDrop = (e: React.DragEvent, targetType: 'space' | 'room', targetId: string, targetSpaceId?: string) => {
+  const handleDrop = useCallback((e: React.DragEvent, targetType: 'space' | 'room', targetId: string, targetSpaceId?: string) => {
     e.preventDefault();
     if (sortMode !== 'custom' || !draggedItem) return;
     
@@ -469,11 +469,11 @@ const RoomListComponent: React.FC = () => {
     }
     
     setDraggedItem(null);
-  };
+  }, [sortMode, draggedItem, customSpaceOrder, spaces, customRoomOrder, roomsWithoutSpace, roomsInSpaces]);
   
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
     setDraggedItem(null);
-  };
+  }, []);
 
   return (
     <div 
@@ -683,7 +683,7 @@ const RoomListComponent: React.FC = () => {
                           spaceId={undefined}
                           client={client}
                           theme={theme}
-                          openRooms={openRooms}
+                          isOpen={openRooms.some(r => r.roomId === room.roomId)}
                           activeRoomId={activeRoomId}
                           draggedItem={draggedItem}
                           sortMode={sortMode}
@@ -848,7 +848,7 @@ const RoomListComponent: React.FC = () => {
                           spaceId={space.roomId}
                           client={client}
                           theme={theme}
-                          openRooms={openRooms}
+                          isOpen={openRooms.some(r => r.roomId === room.roomId)}
                           activeRoomId={activeRoomId}
                           draggedItem={draggedItem}
                           sortMode={sortMode}

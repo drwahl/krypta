@@ -189,29 +189,51 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     document.body.style.color = theme.colors.text;
   }, [theme]);
 
+  const contextValue = useMemo(() => ({
+    theme, 
+    themeName, 
+    defaultThemeName,
+    currentRoomId,
+    currentSpaceId,
+    getRoomThemeObject,
+    setTheme, 
+    setRoomTheme,
+    clearRoomTheme,
+    getRoomTheme,
+    setSpaceTheme,
+    clearSpaceTheme,
+    getSpaceTheme,
+    setCurrentRoom: setCurrentRoomWrapper,
+    availableThemes,
+    allThemes: combinedThemes,
+    serverRoomDefaults: roomThemeDefaults,
+    serverSpaceDefaults: spaceThemeDefaults,
+    serverThemeDefinitions: themeDefinitions,
+    resolveTheme: (name: string) => combinedThemes[name] || combinedThemes.terminal || BUILT_IN_THEMES.terminal,
+  }), [
+    theme, 
+    themeName, 
+    defaultThemeName,
+    currentRoomId,
+    currentSpaceId,
+    getRoomThemeObject,
+    setTheme, 
+    setRoomTheme,
+    clearRoomTheme,
+    getRoomTheme,
+    setSpaceTheme,
+    clearSpaceTheme,
+    getSpaceTheme,
+    setCurrentRoomWrapper,
+    availableThemes,
+    combinedThemes,
+    roomThemeDefaults,
+    spaceThemeDefaults,
+    themeDefinitions,
+  ]);
+
   return (
-    <ThemeContext.Provider value={{ 
-      theme, 
-      themeName, 
-      defaultThemeName,
-      currentRoomId,
-      currentSpaceId,
-      getRoomThemeObject,
-      setTheme, 
-      setRoomTheme,
-      clearRoomTheme,
-      getRoomTheme,
-      setSpaceTheme,
-      clearSpaceTheme,
-      getSpaceTheme,
-      setCurrentRoom: setCurrentRoomWrapper,
-      availableThemes,
-      allThemes: combinedThemes,
-      serverRoomDefaults: roomThemeDefaults,
-      serverSpaceDefaults: spaceThemeDefaults,
-      serverThemeDefinitions: themeDefinitions,
-      resolveTheme: (name: string) => combinedThemes[name] || combinedThemes.terminal || BUILT_IN_THEMES.terminal,
-    }}>
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );

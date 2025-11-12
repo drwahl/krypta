@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient, MatrixClient, ClientEvent, RoomEvent, Room, IndexedDBStore, IndexedDBCryptoStore, MatrixEvent } from 'matrix-js-sdk';
 import { MatrixContextType, ThemeDefinition, ThemeServerDefault } from './types';
 import { Theme } from './themeTypes';
@@ -133,12 +133,50 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     });
     
-    setRooms(roomsList);
-    setSpaces(spacesList);
-    setInvites(invitesList);
-    setRoomThemeDefaults(newRoomDefaults);
-    setSpaceThemeDefaults(newSpaceDefaults);
-    setThemeDefinitions(newDefinitions);
+    // Only update if arrays actually changed (to prevent unnecessary re-renders)
+    setRooms(prev => {
+      if (prev.length !== roomsList.length) return roomsList;
+      // Check if all rooms are the exact same object references
+      if (prev.every((room, i) => room === roomsList[i])) return prev;
+      return roomsList;
+    });
+    setSpaces(prev => {
+      if (prev.length !== spacesList.length) return spacesList;
+      // Check if all spaces are the exact same object references
+      if (prev.every((space, i) => space === spacesList[i])) return prev;
+      return spacesList;
+    });
+    setInvites(prev => {
+      if (prev.length !== invitesList.length) return invitesList;
+      // Check if all invites are the exact same object references
+      if (prev.every((invite, i) => invite === invitesList[i])) return prev;
+      return invitesList;
+    });
+    // Only update theme data if it actually changed
+    setRoomThemeDefaults(prev => {
+      const prevKeys = Object.keys(prev).sort();
+      const newKeys = Object.keys(newRoomDefaults).sort();
+      if (prevKeys.length !== newKeys.length || !prevKeys.every((k, i) => k === newKeys[i])) {
+        return newRoomDefaults;
+      }
+      return prev;
+    });
+    setSpaceThemeDefaults(prev => {
+      const prevKeys = Object.keys(prev).sort();
+      const newKeys = Object.keys(newSpaceDefaults).sort();
+      if (prevKeys.length !== newKeys.length || !prevKeys.every((k, i) => k === newKeys[i])) {
+        return newSpaceDefaults;
+      }
+      return prev;
+    });
+    setThemeDefinitions(prev => {
+      const prevKeys = Object.keys(prev).sort();
+      const newKeys = Object.keys(newDefinitions).sort();
+      if (prevKeys.length !== newKeys.length || !prevKeys.every((k, i) => k === newKeys[i])) {
+        return newDefinitions;
+      }
+      return prev;
+    });
     
     // Restore last open room if no room is currently selected
     if (!currentRoom && roomsList.length > 0) {
@@ -317,7 +355,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     restoreSession();
-  }, [updateRoomsAndSpaces]);
+  }, []); // Only run once on mount (currently disabled anyway)
 
   // Helper function to discover sliding sync proxy from .well-known
   const discoverSlidingSyncProxy = async (homeserver: string): Promise<string | null> => {
@@ -1262,7 +1300,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       mounted = false;
     };
-  }, [updateRoomsAndSpaces]);
+  }, []); // Only run once on mount!
 
   // Helper function to find which space a room belongs to
   const getParentSpace = useCallback((roomId: string): string | null => {
@@ -1395,7 +1433,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [client],
   );
 
-  const value: MatrixContextType = {
+  const value: MatrixContextType = useMemo(() => ({
     client,
     isLoggedIn,
     login,
@@ -1427,7 +1465,39 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     deleteThemeDefinition,
     acceptInvite,
     declineInvite,
-  };
+  }), [
+    client,
+    isLoggedIn,
+    login,
+    logout,
+    currentRoom,
+    setCurrentRoom,
+    rooms,
+    spaces,
+    invites,
+    sendMessage,
+    sendReaction,
+    deleteMessage,
+    loadMoreHistory,
+    getParentSpace,
+    needsVerification,
+    verificationRequest,
+    acceptVerification,
+    cancelVerification,
+    startVerification,
+    isLoading,
+    roomThemeDefaults,
+    spaceThemeDefaults,
+    themeDefinitions,
+    setRoomServerThemeDefault,
+    clearRoomServerThemeDefault,
+    setSpaceServerThemeDefault,
+    clearSpaceServerThemeDefault,
+    upsertThemeDefinition,
+    deleteThemeDefinition,
+    acceptInvite,
+    declineInvite,
+  ]);
 
   return <MatrixContext.Provider value={value}>{children}</MatrixContext.Provider>;
 };

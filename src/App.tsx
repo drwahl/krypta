@@ -20,17 +20,19 @@ const ChatApp: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
 
-  // Reset room sizes when layout direction changes or room count changes
+  // Only reset room sizes when layout direction changes (not when rooms are added/removed)
   // Must be before any conditional returns to follow Rules of Hooks
+  const prevLayoutRef = useRef(layoutDirection);
   useEffect(() => {
-    if (isLoggedIn && openRooms.length > 0) {
-      // Clear all room sizes to reset to equal distribution
+    // Only run when layout direction actually changes, not on every render
+    if (isLoggedIn && openRooms.length > 0 && prevLayoutRef.current !== layoutDirection) {
+      prevLayoutRef.current = layoutDirection;
       const defaultSize = 100 / openRooms.length;
       openRooms.forEach(room => {
         setRoomSize(room.roomId, defaultSize);
       });
     }
-  }, [layoutDirection, openRooms.length, isLoggedIn, openRooms, setRoomSize]);
+  }, [layoutDirection, openRooms, isLoggedIn, setRoomSize]);
 
   if (isLoading) {
     return (

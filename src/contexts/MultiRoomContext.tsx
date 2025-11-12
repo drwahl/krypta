@@ -132,16 +132,16 @@ export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children 
     setRoomSizesState(prev => ({ ...prev, [roomId]: size }));
   }, []);
 
-  const addRoom = (room: Room) => {
+  const addRoom = useCallback((room: Room) => {
     if (!room) return;
     
-    // If room is already open, just make it active
-    if (openRooms.some(r => r.roomId === room.roomId)) {
-      setActiveRoomId(room.roomId);
-      return;
-    }
-    
     setOpenRooms(prev => {
+      // If room is already open, just make it active
+      if (prev.some(r => r.roomId === room.roomId)) {
+        setActiveRoomId(room.roomId);
+        return prev; // Don't modify array
+      }
+      
       // If at max capacity, remove the first (leftmost) room
       if (prev.length >= maxRooms) {
         const newRooms = [...prev.slice(1), room];
@@ -153,9 +153,9 @@ export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children 
       setActiveRoomId(room.roomId);
       return [...prev, room];
     });
-  };
+  }, [maxRooms]);
 
-  const removeRoom = (roomId: string) => {
+  const removeRoom = useCallback((roomId: string) => {
     setOpenRooms(prev => {
       const filtered = prev.filter(r => r.roomId !== roomId);
       
@@ -168,7 +168,7 @@ export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children 
       
       return filtered;
     });
-  };
+  }, [activeRoomId]);
 
   const contextValue = useMemo(() => ({
     openRooms, 
