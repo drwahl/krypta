@@ -115,19 +115,19 @@ const RoomItem: React.FC<RoomItemProps> = React.memo(({
           alt={room.name}
           className="flex-shrink-0 object-cover"
           style={{
-            width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-            height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-            borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
+            width: theme.style.compactMode ? '0.875rem' : '1.25rem',
+            height: theme.style.compactMode ? '0.875rem' : '1.25rem',
+            borderRadius: theme.style.compactMode ? '2px' : '4px',
           }}
         />
       ) : (
         <div 
           className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
           style={{
-            width: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-            height: theme.style.compactMode ? '1rem' : 'var(--sizing-avatarSizeSmall)',
-            borderRadius: theme.style.compactMode ? '2px' : 'var(--sizing-borderRadius)',
-            fontSize: theme.style.compactMode ? '0.5rem' : 'var(--sizing-textXs)',
+            width: theme.style.compactMode ? '0.875rem' : '1.25rem',
+            height: theme.style.compactMode ? '0.875rem' : '1.25rem',
+            borderRadius: theme.style.compactMode ? '2px' : '4px',
+            fontSize: theme.style.compactMode ? '0.45rem' : '0.625rem',
             color: 'var(--color-text)',
           }}
         >
@@ -697,17 +697,20 @@ const RoomListComponent: React.FC = () => {
                         alt={space.name}
                         className="rounded-md flex-shrink-0 object-cover"
                         style={{
-                          width: theme.style.compactMode ? '1rem' : '1.5rem',
-                          height: theme.style.compactMode ? '1rem' : '1.5rem',
+                          width: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                          height: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                          borderRadius: theme.style.compactMode ? '2px' : '4px',
                         }}
                       />
                     ) : (
                       <div 
-                        className="rounded-md bg-primary-500 flex items-center justify-center text-white font-semibold flex-shrink-0"
+                        className="bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center font-semibold flex-shrink-0"
                         style={{
-                          width: theme.style.compactMode ? '1rem' : '1.5rem',
-                          height: theme.style.compactMode ? '1rem' : '1.5rem',
-                          fontSize: theme.style.compactMode ? '0.5rem' : '0.75rem',
+                          width: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                          height: theme.style.compactMode ? '0.875rem' : '1.25rem',
+                          borderRadius: theme.style.compactMode ? '2px' : '4px',
+                          fontSize: theme.style.compactMode ? '0.45rem' : '0.625rem',
+                          color: 'var(--color-text)',
                         }}
                       >
                         {spaceInitials}

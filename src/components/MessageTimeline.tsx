@@ -8,6 +8,7 @@ import { MatrixEvent, Room, MatrixClient } from 'matrix-js-sdk';
 import UrlPreview from './UrlPreview';
 import { useElementCall } from '../hooks/useElementCall';
 import { useThreads } from '../contexts/ThreadsContext';
+import MessageMetadataModal from './MessageMetadataModal';
 
 interface MessageTimelineProps {
   room?: Room; // Optional room prop for multi-pane support
@@ -108,18 +109,27 @@ const MediaRenderer = React.memo<{ content: any; client: MatrixClient; eventType
     const displayUrl = authenticatedThumbnailUrl || authenticatedUrl;
     
     return (
-      <div className="mt-2">
-        <a href={authenticatedUrl} target="_blank" rel="noopener noreferrer">
+      <div className="mt-2 w-full">
+        <a href={authenticatedUrl} target="_blank" rel="noopener noreferrer" className="block w-full">
           <img
             src={displayUrl}
             alt={filename}
-            className="max-w-sm max-h-96 rounded-lg cursor-pointer hover:opacity-90 transition"
-            style={{ maxWidth: width && width < 400 ? width : undefined }}
+            className="w-full max-h-96 rounded-lg cursor-pointer hover:opacity-90 transition object-contain"
+            style={{ minWidth: '100%' }}
             loading="lazy"
+            onError={(e) => {
+              // When image fails to load, ensure alt text displays at full width
+              e.currentTarget.style.minWidth = '100%';
+              e.currentTarget.style.minHeight = '100px';
+              e.currentTarget.style.display = 'block';
+              e.currentTarget.style.backgroundColor = 'rgb(30, 41, 59)';
+              e.currentTarget.style.padding = '1rem';
+              e.currentTarget.style.textAlign = 'center';
+            }}
           />
         </a>
         {filename && (
-          <div className="text-xs text-slate-400 mt-1">{filename}</div>
+          <div className="text-xs text-slate-400 mt-1 w-full break-words">{filename}</div>
         )}
       </div>
     );
@@ -152,16 +162,14 @@ const MediaRenderer = React.memo<{ content: any; client: MatrixClient; eventType
     }
     
     return (
-      <div className="mt-2">
+      <div className="mt-2 w-full">
         <video
           controls
-          className="rounded-lg bg-slate-800"
+          className="rounded-lg bg-slate-800 w-full"
           preload="metadata"
           poster={authenticatedThumbnailUrl || undefined}
           style={{
-            maxWidth: displayWidth ? `${displayWidth}px` : '600px',
             maxHeight: displayHeight ? `${displayHeight}px` : '400px',
-            width: '100%',
             height: 'auto',
           }}
           onError={(e) => {
@@ -175,7 +183,7 @@ const MediaRenderer = React.memo<{ content: any; client: MatrixClient; eventType
           Your browser doesn't support video playback. Try downloading the video instead.
         </video>
         {filename && (
-          <div className="text-xs text-slate-400 mt-1">{filename}</div>
+          <div className="text-xs text-slate-400 mt-1 w-full break-words">{filename}</div>
         )}
       </div>
     );
@@ -186,15 +194,15 @@ const MediaRenderer = React.memo<{ content: any; client: MatrixClient; eventType
     const filesizeStr = filesize ? `(${(filesize / 1024).toFixed(1)} KB)` : '';
     
     return (
-      <div className="mt-2">
+      <div className="mt-2 w-full">
         <a
           href={authenticatedUrl}
           download={filename}
-          className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm"
+          className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-sm w-full"
         >
-          <Upload className="w-4 h-4" />
-          <span>{filename}</span>
-          {filesizeStr && <span className="text-xs text-slate-400">{filesizeStr}</span>}
+          <Upload className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1 truncate">{filename}</span>
+          {filesizeStr && <span className="text-xs text-slate-400 flex-shrink-0">{filesizeStr}</span>}
         </a>
       </div>
     );
@@ -226,6 +234,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   const [customEmojis, setCustomEmojis] = useState<Array<{ mxcUrl: string; name: string; blobUrl?: string }>>([]); // Custom uploaded emojis
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedMessageEvent, setSelectedMessageEvent] = useState<MatrixEvent | null>(null);
   
   // Element Call integration via hook
   const {
@@ -989,51 +998,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       className="flex-1 flex flex-col min-h-0"
       style={{ backgroundColor: 'var(--color-bg)' }}
     >
-      {/* Room header */}
-      <div 
-        className="flex-shrink-0"
-        style={{
-          backgroundColor: 'var(--color-bgSecondary)',
-          borderBottom: '1px solid var(--color-border)',
-          padding: theme.style.compactMode ? 'var(--spacing-sidebarPadding)' : '1rem 1.5rem',
-        }}
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-white">{currentRoom.name}</h2>
-              {isRoomEncrypted && (
-                <div className="flex items-center gap-1 text-green-400" title="End-to-end encrypted">
-                  <Lock className="w-4 h-4" />
-                  <span className="text-xs">Encrypted</span>
-                </div>
-              )}
-              {hasElementCall && (
-                <div className="flex items-center gap-1 text-blue-400" title="Video call available">
-                  <Video className="w-4 h-4" />
-                  <span className="text-xs">Call Available</span>
-                </div>
-              )}
-            </div>
-            <p className="text-sm text-slate-400">
-              {currentRoom.getJoinedMemberCount()} members
-            </p>
-          </div>
-          
-          {/* Join Call button */}
-          {hasElementCall && !showCallFrame && (
-            <button
-              onClick={() => setShowCallFrame(true)}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2 font-medium"
-              title="Join video call"
-            >
-              <Video className="w-5 h-5" />
-              Join Call
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* Element Call Frame */}
       {showCallFrame && callUrl && (
         <div className="relative bg-slate-900 border-b border-slate-700" style={{ height: '600px' }}>
@@ -1118,7 +1082,8 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                 <div
                   key={eventId}
                   data-event-id={eventId}
-                  className="group"
+                  className="group cursor-pointer hover:bg-slate-800/30 transition-colors"
+                  onClick={() => setSelectedMessageEvent(event)}
                   style={{
                     padding: 'var(--spacing-messagePadding)',
                     marginBottom: 'var(--spacing-messageGap)',
@@ -1528,46 +1493,89 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
               <div
                 key={eventId}
                 data-event-id={eventId}
-                className="group"
+                className="group cursor-pointer hover:bg-slate-800/30 transition-colors rounded-lg px-4 py-2 relative"
+                onClick={() => setSelectedMessageEvent(event)}
               >
-                <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-2xl ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
-                    {!isOwn && (
-                      <div className="flex items-center gap-2 mb-1">
-                        {avatarUrl ? (
-                          <img
-                            src={avatarUrl}
-                            alt={sender || 'User'}
-                            className="w-6 h-6 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div 
-                            className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold"
-                            style={{ backgroundColor: getUserColor(sender || 'user') }}
-                          >
-                            {sender?.charAt(1).toUpperCase()}
-                          </div>
-                        )}
-                        <span 
-                          className="text-sm font-medium"
-                          style={{ color: getUserColor(sender || 'user') }}
-                        >
-                          {sender}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          {format(timestamp, 'HH:mm')}
-                        </span>
-                      </div>
-                    )}
+                <div className="flex items-start gap-3 w-full pr-24">
+                  {/* Action buttons - positioned absolutely on the right */}
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition flex gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (showEmojiPicker === eventId) {
+                          setShowEmojiPicker(null);
+                        } else {
+                          setShowEmojiPicker(eventId);
+                          setSelectedCategory('Smileys');
+                        }
+                      }}
+                      className="bg-slate-700 hover:bg-slate-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
+                      title="Add reaction"
+                    >
+                      <Smile className="w-4 h-4" />
+                    </button>
                     
-                    <div className="relative">
-                      <div
-                        className={`px-4 py-2 rounded-2xl ${
-                          isOwn
-                            ? 'bg-primary-600 text-white rounded-br-sm'
-                            : 'bg-slate-800 text-slate-100 rounded-bl-sm'
-                        }`}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePinMessage(eventId);
+                      }}
+                      className="bg-slate-700 hover:bg-slate-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
+                      title="Pin message"
+                    >
+                      <Pin className="w-4 h-4" />
+                    </button>
+                    
+                    {isOwn && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteMessage(eventId);
+                        }}
+                        className="bg-slate-700 hover:bg-red-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
+                        title="Delete message"
                       >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {/* Avatar */}
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={sender || 'User'}
+                      className="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-1"
+                    />
+                  ) : (
+                    <div 
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0 mt-1"
+                      style={{ backgroundColor: getUserColor(sender || 'user') }}
+                    >
+                      {sender?.charAt(1).toUpperCase()}
+                    </div>
+                  )}
+                  
+                  {/* Message content area - full width */}
+                  <div className="flex-1 min-w-0">
+                    {/* Header with sender and timestamp */}
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span 
+                        className="text-sm font-semibold"
+                        style={{ color: getUserColor(sender || 'user') }}
+                      >
+                        {sender}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {format(timestamp, 'HH:mm')}
+                      </span>
+                      {isOwn && (
+                        <span className="text-xs text-slate-600">(You)</span>
+                      )}
+                    </div>
+                    
+                    {/* Message bubble */}
+                    <div className="relative w-full">
+                      <div className="px-4 py-2 rounded-lg bg-slate-800 text-slate-100 w-full">
                         {isRedacted ? (
                           <div className="flex items-center gap-2 text-slate-500 italic">
                             <Trash2 className="w-4 h-4" />
@@ -1582,7 +1590,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                           <>
                             {/* Text content - only show if not media-only or if it has a caption (but not for stickers) */}
                             {(content.msgtype === 'm.text' || (content.body && content.msgtype !== 'm.image' && content.msgtype !== 'm.video' && eventType !== 'm.sticker')) && (
-                              <div className="markdown-body">
+                              <div className="markdown-body w-full break-words">
                                 {renderMessageWithMentions(content.body || '')}
                               </div>
                             )}
@@ -1603,44 +1611,6 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                             )}
                           </>
                         )}
-                      </div>
-
-                      {/* Message actions (reaction, delete) - always rendered but hidden with CSS */}
-                      <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 transition flex gap-1">
-                        <button
-                            onClick={() => {
-                              if (showEmojiPicker === eventId) {
-                                setShowEmojiPicker(null);
-                              } else {
-                                setShowEmojiPicker(eventId);
-                                setSelectedCategory('Smileys'); // Reset to Smileys when opening
-                              }
-                            }}
-                            className="bg-slate-700 hover:bg-slate-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
-                            title="Add reaction"
-                          >
-                            <Smile className="w-4 h-4" />
-                          </button>
-                          
-                          {/* Pin button */}
-                          <button
-                            onClick={() => handlePinMessage(eventId)}
-                            className="bg-slate-700 hover:bg-slate-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
-                            title="Pin message"
-                          >
-                            <Pin className="w-4 h-4" />
-                          </button>
-                          
-                          {/* Delete button - only for own messages */}
-                          {isOwn && (
-                            <button
-                              onClick={() => handleDeleteMessage(eventId)}
-                              className="bg-slate-700 hover:bg-red-600 p-1.5 rounded-full text-slate-300 hover:text-white transition"
-                              title="Delete message"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
                       </div>
                       
                       {/* Emoji picker dropdown */}
@@ -1844,16 +1814,10 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                         </div>
                       )}
                     </div>
-
-                    {isOwn && (
-                      <span className="text-xs text-slate-500 mt-1">
-                        {format(timestamp, 'HH:mm')}
-                      </span>
-                    )}
                     
                     {/* Read Receipts - show who has read up to this message */}
                     {readReceipts.length > 0 && (
-                      <div className="flex items-center gap-1 mt-1 justify-end">
+                      <div className="flex items-center gap-1 mt-1">
                         <div className="flex items-center">
                           {readReceipts.slice(0, 3).map((receipt, index) => (
                             receipt.avatarUrl ? (
@@ -1895,6 +1859,12 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Message Metadata Modal */}
+      <MessageMetadataModal
+        event={selectedMessageEvent}
+        onClose={() => setSelectedMessageEvent(null)}
+      />
     </div>
   );
 };

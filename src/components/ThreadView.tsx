@@ -4,6 +4,8 @@ import { useMatrix } from '../MatrixContext';
 import { Thread, ThreadMessage, ThreadBranch } from '../types/thread';
 import { ChevronDown, ChevronRight, Tag, Users, MessageSquare, Zap, Archive, Trash2 } from 'lucide-react';
 import ThreadMessageInput from './ThreadMessageInput';
+import MessageMetadataModal from './MessageMetadataModal';
+import { MatrixEvent } from 'matrix-js-sdk';
 
 /**
  * ThreadView Component
@@ -36,6 +38,7 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
   const [analysis, setAnalysis] = useState<any>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [localThread, setLocalThread] = useState<Thread>(initialThread);
+  const [selectedMessageEvent, setSelectedMessageEvent] = useState<MatrixEvent | null>(null);
 
   // Update local thread when refreshKey changes
   useEffect(() => {
@@ -140,30 +143,45 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
     }
   };
 
-  const renderMessage = (message: ThreadMessage) => (
-    <div key={message.id} className="p-2 bg-slate-900/50 rounded-lg mb-1.5 border-l-2 border-primary-500">
-      <div className="flex items-start justify-between mb-1">
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded-full bg-primary-500 flex items-center justify-center text-white text-xs font-semibold">
-            {message.sender.name.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <p className="text-xs font-medium text-white">{message.sender.name}</p>
-            <p className="text-xs text-slate-400">
-              {new Date(message.timestamp).toLocaleTimeString()}
+  const renderMessage = (message: ThreadMessage) => {
+    // Get Matrix event if this is a Matrix message
+    const handleClick = () => {
+      if (message.eventId && currentRoom && client) {
+        const event = currentRoom.findEventById(message.eventId);
+        if (event) {
+          setSelectedMessageEvent(event);
+        } else {
+          console.warn(`Event ${message.eventId} not found in room`);
+        }
+      }
+    };
+
+    return (
+      <div 
+        key={message.id} 
+        className="p-2 bg-slate-900/50 rounded-lg mb-1.5 border-l-2 border-primary-500 cursor-pointer hover:bg-slate-800/50 transition-colors"
+        onClick={handleClick}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="w-5 h-5 rounded-full bg-primary-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+              {message.sender.name.charAt(0).toUpperCase()}
+            </div>
+            <p className="text-xs font-medium text-white truncate">{message.sender.name}</p>
+            <p className="text-xs text-slate-400 flex-shrink-0">
+              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </p>
           </div>
+          {message.reactions && Object.keys(message.reactions).length > 0 && (
+            <div className="flex gap-1 flex-shrink-0">
+              {Object.entries(message.reactions).map(([emoji, count]) => (
+                <span key={emoji} className="text-xs bg-slate-800 px-2 py-1 rounded">
+                  {emoji} {count}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-        {message.reactions && Object.keys(message.reactions).length > 0 && (
-          <div className="flex gap-1">
-            {Object.entries(message.reactions).map(([emoji, count]) => (
-              <span key={emoji} className="text-xs bg-slate-800 px-2 py-1 rounded">
-                {emoji} {count}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
       <p className="text-xs text-slate-200 mb-1">{message.content}</p>
       {message.contextualObjects.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -179,8 +197,9 @@ export const ThreadView: React.FC<ThreadViewProps> = ({ thread: initialThread, o
           ))}
         </div>
       )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderBranch = (branch: ThreadBranch, depth: number = 0) => {
     const isExpanded = expandedBranches.has(branch.id);
