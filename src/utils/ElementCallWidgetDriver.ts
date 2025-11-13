@@ -43,7 +43,7 @@ export class ElementCallWidgetDriver extends WidgetDriver {
   }
 
   public override async validateCapabilities(requested: Set<Capability>): Promise<Set<Capability>> {
-    // For now, grant all requested capabilities. NyChatt is the trusted host.
+    // For now, grant all requested capabilities. Krypta is the trusted host.
     return new Set(requested);
   }
 

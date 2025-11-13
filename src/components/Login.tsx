@@ -46,7 +46,7 @@ const Login: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold text-white mb-2">NyChatt</h1>
+          <h1 className="text-5xl font-bold text-white mb-2">Krypta</h1>
           <p className="text-slate-300 text-lg">The Matrix client that doesn't suck</p>
         </div>
 

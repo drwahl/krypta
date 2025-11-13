@@ -25,22 +25,22 @@ export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [openRooms, setOpenRooms] = useState<Room[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(() => {
     // Restore active room ID from localStorage
-    return localStorage.getItem('nychatt_active_room_id');
+    return localStorage.getItem('krypta_active_room_id');
   });
   const [openRoomIds, setOpenRoomIds] = useState<string[]>(() => {
     // Restore open room IDs from localStorage
-    const stored = localStorage.getItem('nychatt_open_room_ids');
+    const stored = localStorage.getItem('krypta_open_room_ids');
     return stored ? JSON.parse(stored) : [];
   });
   const [restoredSession, setRestoredSession] = useState(false);
   const [layoutDirection, setLayoutDirectionState] = useState<LayoutDirection>(() => {
-    const stored = localStorage.getItem('nychatt_layout_direction');
+    const stored = localStorage.getItem('krypta_layout_direction');
     return (stored === 'vertical' || stored === 'horizontal') ? stored : 'horizontal';
   });
   const [roomSizes, setRoomSizesState] = useState<Record<string, number>>({});
   const [maxRooms, setMaxRoomsState] = useState<number>(() => {
     // Restore max rooms from localStorage, default to 3
-    const stored = localStorage.getItem('nychatt_max_rooms');
+    const stored = localStorage.getItem('krypta_max_rooms');
     const parsed = stored ? parseInt(stored, 10) : 3;
     // Ensure value is between 1 and 10
     return Math.max(1, Math.min(10, parsed));
@@ -83,26 +83,26 @@ export const MultiRoomProvider: React.FC<{ children: ReactNode }> = ({ children 
   // Persist active room ID to localStorage
   useEffect(() => {
     if (activeRoomId) {
-      localStorage.setItem('nychatt_active_room_id', activeRoomId);
+      localStorage.setItem('krypta_active_room_id', activeRoomId);
     } else {
-      localStorage.removeItem('nychatt_active_room_id');
+      localStorage.removeItem('krypta_active_room_id');
     }
   }, [activeRoomId]);
 
   // Persist open room IDs to localStorage
   useEffect(() => {
     const roomIds = openRooms.map(r => r.roomId);
-    localStorage.setItem('nychatt_open_room_ids', JSON.stringify(roomIds));
+    localStorage.setItem('krypta_open_room_ids', JSON.stringify(roomIds));
   }, [openRooms]);
 
   // Persist layout direction to localStorage
   useEffect(() => {
-    localStorage.setItem('nychatt_layout_direction', layoutDirection);
+    localStorage.setItem('krypta_layout_direction', layoutDirection);
   }, [layoutDirection]);
 
   // Persist max rooms to localStorage
   useEffect(() => {
-    localStorage.setItem('nychatt_max_rooms', maxRooms.toString());
+    localStorage.setItem('krypta_max_rooms', maxRooms.toString());
   }, [maxRooms]);
 
   // Close extra rooms if maxRooms is reduced below current open rooms count

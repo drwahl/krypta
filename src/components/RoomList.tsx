@@ -186,25 +186,25 @@ const RoomListComponent: React.FC = () => {
   
   // Persist expanded spaces
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem('nychatt_expanded_spaces');
+    const stored = localStorage.getItem('krypta_expanded_spaces');
     return stored ? new Set(JSON.parse(stored)) : new Set();
   });
   
   // Persist muted spaces
   const [mutedSpaces, setMutedSpaces] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem('nychatt_muted_spaces');
+    const stored = localStorage.getItem('krypta_muted_spaces');
     return stored ? new Set(JSON.parse(stored)) : new Set();
   });
   
   // Persist orphan rooms expanded state (default to false/collapsed)
   const [isOrphanRoomsExpanded, setIsOrphanRoomsExpanded] = useState(() => {
-    const stored = localStorage.getItem('nychatt_orphan_rooms_expanded');
+    const stored = localStorage.getItem('krypta_orphan_rooms_expanded');
     return stored ? JSON.parse(stored) : false;
   });
   
   // Persist expanded space members
   const [expandedSpaceMembers, setExpandedSpaceMembers] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem('nychatt_expanded_space_members');
+    const stored = localStorage.getItem('krypta_expanded_space_members');
     return stored ? new Set(JSON.parse(stored)) : new Set();
   });
   
@@ -248,17 +248,17 @@ const RoomListComponent: React.FC = () => {
   
   // Persist expanded spaces
   useEffect(() => {
-    localStorage.setItem('nychatt_expanded_spaces', JSON.stringify(Array.from(expandedSpaces)));
+    localStorage.setItem('krypta_expanded_spaces', JSON.stringify(Array.from(expandedSpaces)));
   }, [expandedSpaces]);
   
   // Persist orphan rooms expanded state
   useEffect(() => {
-    localStorage.setItem('nychatt_orphan_rooms_expanded', JSON.stringify(isOrphanRoomsExpanded));
+    localStorage.setItem('krypta_orphan_rooms_expanded', JSON.stringify(isOrphanRoomsExpanded));
   }, [isOrphanRoomsExpanded]);
   
   // Persist muted spaces
   useEffect(() => {
-    localStorage.setItem('nychatt_muted_spaces', JSON.stringify(Array.from(mutedSpaces)));
+    localStorage.setItem('krypta_muted_spaces', JSON.stringify(Array.from(mutedSpaces)));
   }, [mutedSpaces]);
   
   // Persist custom orders
@@ -278,7 +278,7 @@ const RoomListComponent: React.FC = () => {
       newExpanded.add(spaceId);
     }
     setExpandedSpaces(newExpanded);
-    localStorage.setItem('nychatt_expanded_spaces', JSON.stringify(Array.from(newExpanded)));
+    localStorage.setItem('krypta_expanded_spaces', JSON.stringify(Array.from(newExpanded)));
   };
 
   const toggleSpaceMembers = (spaceId: string, e?: React.MouseEvent) => {
@@ -292,7 +292,7 @@ const RoomListComponent: React.FC = () => {
       newExpanded.add(spaceId);
     }
     setExpandedSpaceMembers(newExpanded);
-    localStorage.setItem('nychatt_expanded_space_members', JSON.stringify(Array.from(newExpanded)));
+    localStorage.setItem('krypta_expanded_space_members', JSON.stringify(Array.from(newExpanded)));
   };
 
   const toggleMuteSpace = (spaceId: string, e?: React.MouseEvent) => {
@@ -525,7 +525,7 @@ const RoomListComponent: React.FC = () => {
               color: 'var(--color-text)',
             }}
           >
-            {theme.style.compactMode ? '> NyChatt' : 'NyChatt'}
+            {theme.style.compactMode ? '> Krypta' : 'Krypta'}
           </h2>
           <div className="flex items-center" style={{ gap: '0.5rem' }}>
             <button

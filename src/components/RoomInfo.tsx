@@ -7,7 +7,7 @@ import { useNotifications } from '../contexts/NotificationContext';
 import { format } from 'date-fns';
 import { Theme } from '../themeTypes';
 
-const THEME_DEFAULT_EVENT_TYPE = 'com.nychatt.theme.default';
+const THEME_DEFAULT_EVENT_TYPE = 'com.krypta.theme.default';
 
 const parseThemeFromJson = (value: any, fallbackName: string): Theme | null => {
   if (!value || typeof value !== 'object') return null;

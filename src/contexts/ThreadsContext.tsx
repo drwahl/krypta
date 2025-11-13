@@ -107,7 +107,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const metadata = threadSyncRef.current.loadAllThreadMetadata(currentRoom);
         
         // Load custom thread titles from room account data (per-user)
-        const threadTitlesEvent = currentRoom.getAccountData('com.nychatt.thread_titles');
+        const threadTitlesEvent = currentRoom.getAccountData('com.krypta.thread_titles');
         const threadTitles = threadTitlesEvent?.getContent() || {};
         
         console.log(`📊 Found ${matrixThreads.size} Matrix threads`);
@@ -206,7 +206,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     
     const handleRoomState = (event: any) => {
       // Check if this is a thread metadata update
-      if (event.getType() === 'com.nychatt.thread.metadata') {
+      if (event.getType() === 'com.krypta.thread.metadata') {
         const stateKey = event.getStateKey();
         const content = event.getContent();
         console.log(`🔔 Thread metadata state event received!`);
@@ -698,7 +698,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
           console.log(`📤 Saving thread title to Matrix room account data...`);
           
           // Get existing thread titles for this room
-          const existingEvent = currentRoom.getAccountData('com.nychatt.thread_titles');
+          const existingEvent = currentRoom.getAccountData('com.krypta.thread_titles');
           const existingData = existingEvent?.getContent() || {};
           
           console.log(`📋 Existing thread titles:`, existingData);
@@ -717,7 +717,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
           // Save to room account data - any user can do this for themselves
           await client.setRoomAccountData(
             currentRoom.roomId,
-            'com.nychatt.thread_titles',
+            'com.krypta.thread_titles',
             updatedData
           );
           
@@ -725,7 +725,7 @@ export const ThreadsProvider: React.FC<{ children: React.ReactNode }> = ({ child
           
           // Verify it was saved
           setTimeout(() => {
-            const verifyEvent = currentRoom.getAccountData('com.nychatt.thread_titles');
+            const verifyEvent = currentRoom.getAccountData('com.krypta.thread_titles');
             const verifyData = verifyEvent?.getContent();
             console.log(`✔️ Verification - account data:`, verifyData);
           }, 100);

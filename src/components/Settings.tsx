@@ -181,7 +181,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose, sortMode, onSortCh
           }}
         >
           <p className="text-xs text-center" style={{ color: 'var(--color-textMuted)' }}>
-            NyChatt - A modern Matrix client
+            Krypta - A modern Matrix client
           </p>
         </div>
       </div>

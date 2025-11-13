@@ -5,8 +5,8 @@ import { Theme } from './themeTypes';
 
 const MatrixContext = createContext<MatrixContextType | undefined>(undefined);
 
-const THEME_DEFAULT_EVENT = 'com.nychatt.theme.default';
-const THEME_DEFINITION_EVENT = 'com.nychatt.theme.definition';
+const THEME_DEFAULT_EVENT = 'com.krypta.theme.default';
+const THEME_DEFINITION_EVENT = 'com.krypta.theme.definition';
 
 const extractThemeFromContent = (content: any, fallbackName: string): Theme | null => {
   if (!content || typeof content !== 'object') return null;
@@ -54,10 +54,10 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const setCurrentRoom = useCallback((room: Room | null) => {
     setCurrentRoomState(room);
     if (room) {
-      localStorage.setItem('nychatt_last_room_id', room.roomId);
+      localStorage.setItem('krypta_last_room_id', room.roomId);
       console.log(`💾 Saved last room: ${room.name} (${room.roomId})`);
     } else {
-      localStorage.removeItem('nychatt_last_room_id');
+      localStorage.removeItem('krypta_last_room_id');
     }
   }, []);
 
@@ -178,20 +178,20 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return prev;
     });
     
-    // Restore last open room if no room is currently selected
-    if (!currentRoom && roomsList.length > 0) {
-      const lastRoomId = localStorage.getItem('nychatt_last_room_id');
-      if (lastRoomId) {
-        const lastRoom = allRooms.find(r => r.roomId === lastRoomId);
-        if (lastRoom) {
-          console.log(`🔄 Restoring last room: ${lastRoom.name} (${lastRoomId})`);
-          setCurrentRoomState(lastRoom);
-        } else {
-          console.log(`⚠️ Last room ${lastRoomId} not found, clearing saved ID`);
-          localStorage.removeItem('nychatt_last_room_id');
+      // Restore last open room if no room is currently selected
+      if (!currentRoom && roomsList.length > 0) {
+        const lastRoomId = localStorage.getItem('krypta_last_room_id');
+        if (lastRoomId) {
+          const lastRoom = allRooms.find(r => r.roomId === lastRoomId);
+          if (lastRoom) {
+            console.log(`🔄 Restoring last room: ${lastRoom.name} (${lastRoomId})`);
+            setCurrentRoomState(lastRoom);
+          } else {
+            console.log(`⚠️ Last room ${lastRoomId} not found, clearing saved ID`);
+            localStorage.removeItem('krypta_last_room_id');
+          }
         }
       }
-    }
   }, [currentRoom]);
 
   // Restore session from stored credentials on mount
@@ -781,9 +781,9 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       localStorage.removeItem('mx_device_id');
       localStorage.removeItem('mx_sliding_sync_proxy');
       // Clear room selection state
-      localStorage.removeItem('nychatt_last_room_id');
-      localStorage.removeItem('nychatt_active_room_id');
-      localStorage.removeItem('nychatt_open_room_ids');
+      localStorage.removeItem('krypta_last_room_id');
+      localStorage.removeItem('krypta_active_room_id');
+      localStorage.removeItem('krypta_open_room_ids');
     }
   };
 

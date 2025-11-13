@@ -26,7 +26,7 @@ export class ThreadSync {
    */
   static isThreadRootMarker(event: MatrixEvent): boolean {
     const content = event.getContent();
-    return content['com.nychatt.thread_root'] === true;
+    return content['com.krypta.thread_root'] === true;
   }
 
   /**
@@ -34,7 +34,7 @@ export class ThreadSync {
    */
   static isSystemMessage(event: MatrixEvent): boolean {
     const content = event.getContent();
-    return content['com.nychatt.is_system_message'] === true;
+    return content['com.krypta.is_system_message'] === true;
   }
 
   /**
@@ -106,8 +106,8 @@ export class ThreadSync {
         format: 'org.matrix.custom.html',
         formatted_body: content.replace(/\n/g, '<br/>'),
         // Custom metadata to identify this as a thread root
-        'com.nychatt.thread_root': true,
-        'com.nychatt.is_system_message': true, // Mark as system message to hide from timeline
+        'com.krypta.thread_root': true,
+        'com.krypta.is_system_message': true, // Mark as system message to hide from timeline
       };
 
       console.log(`📤 Sending thread root message to room ${roomId}...`);
@@ -289,7 +289,7 @@ export class ThreadSync {
 
       await this.client.sendStateEvent(
         roomId,
-        'com.nychatt.thread.metadata',
+        'com.krypta.thread.metadata',
         content,
         stateKey
       );
@@ -319,7 +319,7 @@ export class ThreadSync {
       if (!room) return null;
 
       const stateEvent = room.currentState.getStateEvents(
-        'com.nychatt.thread.metadata',
+        'com.krypta.thread.metadata',
         threadRootEventId
       );
 
@@ -341,7 +341,7 @@ export class ThreadSync {
     const metadata = new Map<string, any>();
 
     try {
-      const stateEvents = room.currentState.getStateEvents('com.nychatt.thread.metadata');
+      const stateEvents = room.currentState.getStateEvents('com.krypta.thread.metadata');
 
       if (Array.isArray(stateEvents)) {
         for (const event of stateEvents) {
@@ -394,7 +394,7 @@ export class ThreadSync {
 
       await this.client.sendStateEvent(
         roomId,
-        'com.nychatt.thread.metadata',
+        'com.krypta.thread.metadata',
         content,
         threadRootEventId
       );

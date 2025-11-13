@@ -33,16 +33,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { roomThemeDefaults, spaceThemeDefaults, themeDefinitions } = useMatrix();
 
   const [defaultThemeName, setDefaultThemeName] = useState<string>(() => {
-    return localStorage.getItem('nychatt_theme') || 'terminal';
+    return localStorage.getItem('krypta_theme') || 'terminal';
   });
 
   const [roomThemeOverrides, setRoomThemeOverrides] = useState<Record<string, string>>(() => {
-    const stored = localStorage.getItem('nychatt_room_themes');
+    const stored = localStorage.getItem('krypta_room_themes');
     return stored ? JSON.parse(stored) : {};
   });
 
   const [spaceThemeOverrides, setSpaceThemeOverrides] = useState<Record<string, string>>(() => {
-    const stored = localStorage.getItem('nychatt_space_themes');
+    const stored = localStorage.getItem('krypta_space_themes');
     return stored ? JSON.parse(stored) : {};
   });
 
@@ -86,7 +86,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setTheme = (newThemeName: string) => {
     if (combinedThemes[newThemeName]) {
       setDefaultThemeName(newThemeName);
-      localStorage.setItem('nychatt_theme', newThemeName);
+      localStorage.setItem('krypta_theme', newThemeName);
     }
   };
 
@@ -94,7 +94,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (combinedThemes[themeName]) {
       const newOverrides = { ...roomThemeOverrides, [roomId]: themeName };
       setRoomThemeOverrides(newOverrides);
-      localStorage.setItem('nychatt_room_themes', JSON.stringify(newOverrides));
+      localStorage.setItem('krypta_room_themes', JSON.stringify(newOverrides));
     }
   };
 
@@ -102,7 +102,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newOverrides = { ...roomThemeOverrides };
     delete newOverrides[roomId];
     setRoomThemeOverrides(newOverrides);
-    localStorage.setItem('nychatt_room_themes', JSON.stringify(newOverrides));
+    localStorage.setItem('krypta_room_themes', JSON.stringify(newOverrides));
   };
 
   const getRoomTheme = (roomId: string): string | null => {
@@ -113,7 +113,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (combinedThemes[themeName]) {
       const newOverrides = { ...spaceThemeOverrides, [spaceId]: themeName };
       setSpaceThemeOverrides(newOverrides);
-      localStorage.setItem('nychatt_space_themes', JSON.stringify(newOverrides));
+      localStorage.setItem('krypta_space_themes', JSON.stringify(newOverrides));
     }
   };
 
@@ -121,7 +121,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newOverrides = { ...spaceThemeOverrides };
     delete newOverrides[spaceId];
     setSpaceThemeOverrides(newOverrides);
-    localStorage.setItem('nychatt_space_themes', JSON.stringify(newOverrides));
+    localStorage.setItem('krypta_space_themes', JSON.stringify(newOverrides));
   };
 
   const getSpaceTheme = (spaceId: string): string | null => {

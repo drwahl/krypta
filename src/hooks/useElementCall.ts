@@ -61,7 +61,7 @@ const generateElementCallUrl = (
   // Determine if room has encryption
   const hasEncryption = room.hasEncryptionStateEvent();
   
-  const widgetId = `nychatt_call_${roomId}`;
+  const widgetId = `krypta_call_${roomId}`;
   const userId = client.getUserId() || '';
   const displayName =
     client.getUser(userId)?.displayName || userId.split(':')[0]?.replace(/^@/, '') || userId || 'Matrix User';
@@ -203,7 +203,7 @@ export const useElementCall = (room: Room | null, client: MatrixClient | null) =
     teardownWidget();
 
     try {
-      const widgetId = `nychatt_call_${room.roomId}`;
+      const widgetId = `krypta_call_${room.roomId}`;
       deviceMuteStateRef.current = { audio_enabled: true, video_enabled: true };
 
       const widget = new Widget({

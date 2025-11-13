@@ -1,4 +1,4 @@
-# NyChatt Threading System
+# Krypta Threading System
 
 A sophisticated semantic conversation model that organizes messages into intelligent containers with support for multiple sources, branching, and on-demand AI analysis.
 

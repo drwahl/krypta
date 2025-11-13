@@ -5,7 +5,7 @@ import { Thread, ThreadMessage } from '../types/thread';
  * Allows threads to survive page reloads
  */
 export class ThreadStorage {
-  private dbName = 'NyChattThreads';
+  private dbName = 'KryptaThreads';
   private storeName = 'threads';
   private version = 1;
   private db: IDBDatabase | null = null;

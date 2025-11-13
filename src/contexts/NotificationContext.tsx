@@ -39,7 +39,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   );
 
   const [settings, setSettings] = useState<NotificationSettings>(() => {
-    const stored = localStorage.getItem('nychatt_notification_settings');
+    const stored = localStorage.getItem('krypta_notification_settings');
     if (stored) {
       const parsed = JSON.parse(stored);
       // Ensure new fields exist
@@ -236,7 +236,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const updateSettings = useCallback((newSettings: Partial<NotificationSettings>) => {
     setSettings(prev => {
       const updated = { ...prev, ...newSettings };
-      localStorage.setItem('nychatt_notification_settings', JSON.stringify(updated));
+      localStorage.setItem('krypta_notification_settings', JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -270,7 +270,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
         ? prev.mutedRooms.filter(id => id !== roomId)
         : [...prev.mutedRooms, roomId];
       const updated = { ...prev, mutedRooms };
-      localStorage.setItem('nychatt_notification_settings', JSON.stringify(updated));
+      localStorage.setItem('krypta_notification_settings', JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -282,7 +282,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
         ? prev.allowedRooms.filter(id => id !== roomId)
         : [...prev.allowedRooms, roomId];
       const updated = { ...prev, allowedRooms };
-      localStorage.setItem('nychatt_notification_settings', JSON.stringify(updated));
+      localStorage.setItem('krypta_notification_settings', JSON.stringify(updated));
       return updated;
     });
   }, []);

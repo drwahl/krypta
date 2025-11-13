@@ -661,7 +661,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
         
         // Filter out system messages (like thread root markers)
         // Note: Could also use ThreadSync.isSystemMessage(event) but avoiding dependency
-        if (content['com.nychatt.is_system_message'] === true) {
+        if (content['com.krypta.is_system_message'] === true) {
           return false;
         }
         
@@ -989,7 +989,7 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
       <div className="flex-1 flex items-center justify-center bg-slate-900">
         <div className="text-center">
           <div className="text-6xl mb-4">💬</div>
-          <h2 className="text-2xl font-bold text-white mb-2">Welcome to NyChatt</h2>
+          <h2 className="text-2xl font-bold text-white mb-2">Welcome to Krypta</h2>
           <p className="text-slate-400">Select a room to start chatting</p>
         </div>
       </div>
@@ -1766,7 +1766,10 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                       {/* Thread indicator */}
                       {threadReplies.count > 0 && (
                         <button
-                          onClick={() => openThread(eventId)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openThread(eventId);
+                          }}
                           className="mt-1 px-2 py-1 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
                           title={`${threadReplies.count} ${threadReplies.count === 1 ? 'reply' : 'replies'}`}
                         >

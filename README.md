@@ -1,4 +1,4 @@
-# NyChatt - A Modern Matrix Client
+# Krypta - A Modern Matrix Client
 
 A blazingly fast, beautiful, and feature-rich Matrix chat client that's 1000x better than Element.
 
@@ -16,7 +16,7 @@ A blazingly fast, beautiful, and feature-rich Matrix chat client that's 1000x be
 - **Sliding Sync**: Optional support for faster syncing
 - **Responsive Design**: Works perfectly on all screen sizes
 
-## 🎯 Why NyChatt is Better
+## 🎯 Why Krypta is Better
 
 - **Faster Loading**: Vite-powered development and production builds
 - **Modern Design**: Clean, intuitive interface inspired by the best chat apps
@@ -73,7 +73,7 @@ npm run build
 
 ### End-to-End Encryption (E2EE)
 
-NyChatt supports full end-to-end encryption for Matrix rooms. Here's what you need to know:
+Krypta supports full end-to-end encryption for Matrix rooms. Here's what you need to know:
 
 **First Time Setup:**
 1. Log in to your account
