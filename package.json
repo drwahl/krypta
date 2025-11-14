@@ -3,6 +3,26 @@
   "version": "1.0.0",
   "description": "A blazingly fast, modern Matrix chat client",
   "type": "module",
+  "author": "Krypta Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/krypta.git"
+  },
+  "keywords": [
+    "matrix",
+    "chat",
+    "messaging",
+    "e2ee",
+    "encryption",
+    "react",
+    "typescript",
+    "vite"
+  ],
+  "bugs": {
+    "url": "https://github.com/YOUR_USERNAME/krypta/issues"
+  },
+  "homepage": "https://github.com/YOUR_USERNAME/krypta#readme",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
