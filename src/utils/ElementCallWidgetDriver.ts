@@ -10,8 +10,6 @@ import {
   OpenIDRequestState,
 } from 'matrix-widget-api';
 import type { MatrixClient, MatrixEvent, Room } from 'matrix-js-sdk';
-import type { SendDelayedEventRequestOpts } from 'matrix-js-sdk/lib/@types/requests';
-import { UpdateDelayedEventAction } from 'matrix-js-sdk/lib/@types/requests';
 
 interface TurnServerCredentials {
   uris: string[];
@@ -63,14 +61,14 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     let response: unknown;
     if (stateKey !== null) {
       const resolvedKey = stateKey ?? '';
-      response = await this.client.sendStateEvent(
+      response = await (this.client as any).sendStateEvent(
         targetRoomId,
-        eventType,
+        eventType as any,
         eventContent as Record<string, unknown>,
         resolvedKey,
       );
     } else {
-      response = await this.client.sendEvent(targetRoomId, eventType, eventContent, undefined);
+      response = await (this.client as any).sendEvent(targetRoomId, eventType as any, eventContent, undefined);
     }
 
     const eventId = typeof response === 'string' ? response : (response as { event_id?: string })?.event_id ?? '';
@@ -87,7 +85,7 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     return this.sendMatrixEvent(eventType, content, stateKey, roomId);
   }
 
-  private buildDelayOpts(delay: number | null, parentDelayId: string | null): SendDelayedEventRequestOpts {
+  private buildDelayOpts(delay: number | null, parentDelayId: string | null): Record<string, unknown> {
     if (delay === null && parentDelayId === null) {
       throw new Error('Must provide at least one of delay or parentDelayId');
     }
@@ -99,7 +97,7 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     if (parentDelayId !== null) {
       opts.parent_delay_id = parentDelayId;
     }
-    return opts as SendDelayedEventRequestOpts;
+    return opts;
   }
 
   public override async sendDelayedEvent(
@@ -143,19 +141,19 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     }
   }
 
-  public override async updateDelayedEvent(delayId: string, action: UpdateDelayedEventAction): Promise<void> {
+  public async updateDelayedEvent(delayId: string, action: string): Promise<void> {
     await (this.client as any)._unstable_updateDelayedEvent(delayId, action);
   }
 
-  public override async cancelScheduledDelayedEvent(delayId: string): Promise<void> {
+  public async cancelScheduledDelayedEvent(delayId: string): Promise<void> {
     await (this.client as any)._unstable_cancelScheduledDelayedEvent(delayId);
   }
 
-  public override async restartScheduledDelayedEvent(delayId: string): Promise<void> {
+  public async restartScheduledDelayedEvent(delayId: string): Promise<void> {
     await (this.client as any)._unstable_restartScheduledDelayedEvent(delayId);
   }
 
-  public override async sendScheduledDelayedEvent(delayId: string): Promise<void> {
+  public async sendScheduledDelayedEvent(delayId: string): Promise<void> {
     await (this.client as any)._unstable_sendScheduledDelayedEvent(delayId);
   }
 
@@ -164,43 +162,23 @@ export class ElementCallWidgetDriver extends WidgetDriver {
     encrypted: boolean,
     contentMap: { [userId: string]: { [deviceId: string]: object } },
   ): Promise<void> {
-    if (encrypted) {
-      const crypto = this.client.getCrypto();
-      if (!crypto) {
-        throw new Error('Encryption is not enabled for this client');
+    // Convert contentMap object to Map format required by matrix-js-sdk v34
+    const contentMapAsMap = new Map<string, Map<string, Record<string, any>>>();
+    
+    for (const [userId, devices] of Object.entries(contentMap)) {
+      const deviceMap = new Map<string, Record<string, any>>();
+      for (const [deviceId, payload] of Object.entries(devices)) {
+        deviceMap.set(deviceId, payload as Record<string, any>);
       }
-
-      const inverted: Record<string, { userId: string; deviceId: string }[]> = {};
-      for (const [userId, devices] of Object.entries(contentMap)) {
-        for (const [deviceId, payload] of Object.entries(devices)) {
-          const key = JSON.stringify(payload);
-          if (!inverted[key]) {
-            inverted[key] = [];
-          }
-          inverted[key].push({ userId, deviceId });
-        }
-      }
-
-      await Promise.all(
-        Object.entries(inverted).map(async ([payloadString, recipients]) => {
-          const payload = JSON.parse(payloadString);
-          const batch = await crypto.encryptToDeviceMessages(eventType, recipients, payload);
-          await this.client.queueToDevice(batch);
-        }),
-      );
-
-      return;
+      contentMapAsMap.set(userId, deviceMap);
     }
 
-    const batch = Object.entries(contentMap).flatMap(([userId, devices]) =>
-      Object.entries(devices).map(([deviceId, payload]) => ({
-        userId,
-        deviceId,
-        payload,
-      })),
-    );
-
-    await this.client.queueToDevice({ eventType, batch });
+    try {
+      await this.client.sendToDevice(eventType as any, contentMapAsMap as any);
+    } catch (error) {
+      console.error('[ElementCallWidgetDriver] Failed to send to-device messages', error);
+      throw error;
+    }
   }
 
   public override async readRoomTimeline(

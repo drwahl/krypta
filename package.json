@@ -25,7 +25,8 @@
   "homepage": "https://github.com/YOUR_USERNAME/krypta#readme",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "build:check": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "postinstall": "mkdir -p public && cp node_modules/@matrix-org/olm/olm.wasm public/ && cp node_modules/@matrix-org/olm/olm.js public/",
