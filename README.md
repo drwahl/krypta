@@ -45,11 +45,25 @@ A blazingly fast, beautiful, and feature-rich Matrix chat client that's 1000x be
 
 ## 📦 Installation
 
-### Prerequisites
+### Option 1: Docker (Recommended for Production)
+
+```bash
+# Pull from Docker Hub
+docker pull YOUR_DOCKERHUB_USERNAME/krypta:latest
+
+# Run the container
+docker run -d -p 8080:80 --name krypta YOUR_DOCKERHUB_USERNAME/krypta:latest
+```
+
+Access at `http://localhost:8080` - See [DOCKER.md](DOCKER.md) for detailed Docker deployment guide.
+
+### Option 2: Local Development
+
+#### Prerequisites
 - Node.js 18+ 
 - npm or yarn
 
-### Setup
+#### Setup
 
 ```bash
 # Clone the repository

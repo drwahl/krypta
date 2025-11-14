@@ -28,7 +28,13 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "postinstall": "mkdir -p public && cp node_modules/@matrix-org/olm/olm.wasm public/ && cp node_modules/@matrix-org/olm/olm.js public/"
+    "postinstall": "mkdir -p public && cp node_modules/@matrix-org/olm/olm.wasm public/ && cp node_modules/@matrix-org/olm/olm.js public/",
+    "docker:build": "docker build -t krypta:latest .",
+    "docker:run": "docker run -d -p 8080:80 --name krypta krypta:latest",
+    "docker:stop": "docker stop krypta && docker rm krypta",
+    "docker:logs": "docker logs -f krypta",
+    "docker:compose:up": "docker-compose up -d",
+    "docker:compose:down": "docker-compose down"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

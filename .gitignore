@@ -30,3 +30,6 @@ dist-ssr
 .env.production
 .env*.local
 
+# Docker volumes
+docker-volumes/
+
