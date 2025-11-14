@@ -535,6 +535,11 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
                   theme={theme.name === 'dark' || theme.name === 'terminal' ? 'dark' : 'light'}
                   previewPosition="none"
                   skinTonePosition="none"
+                  searchPosition="sticky"
+                  navPosition="top"
+                  perLine={8}
+                  maxFrequentRows={2}
+                  set="native"
                 />
               </div>
             )}

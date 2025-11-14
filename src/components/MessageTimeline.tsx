@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { format } from 'date-fns';
-import ReactMarkdown from 'react-markdown';
 import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin, MessageSquare } from 'lucide-react';
 import { MatrixEvent, Room, MatrixClient } from 'matrix-js-sdk';
 import UrlPreview from './UrlPreview';
@@ -307,180 +306,25 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     const eventId = event.getId();
     if (!eventId) return;
     
+    // Validate event ID format (should start with $)
+    if (!eventId.startsWith('$')) {
+      console.warn('Invalid event ID format, skipping read receipt:', eventId);
+      return;
+    }
+    
     try {
       client.sendReadReceipt(event);
     } catch (error) {
-      console.error('Failed to send read receipt:', error);
+      console.error('Failed to send read receipt:', error, 'Event ID:', eventId);
     }
   }, [client, currentRoom]);
 
-  // Parse message for user mentions and URLs, render as pills/links
+  // Render plain text with URLs and mentions
   const renderMessageWithMentions = (text: string) => {
     if (!currentRoom) return text;
     
-    // Regex patterns
-    const matrixLinkRegex = /https:\/\/matrix\.to\/#\/(@[a-zA-Z0-9._=\-]+:[a-zA-Z0-9.\-]+)/g;
-    const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
-    const plainMentionRegex = /@([a-zA-Z0-9.\-_\s]+?)(?=\s|$|[.,!?;:])/g;
-    
-    // Find all matches with their positions
-    interface Match {
-      type: 'matrixLink' | 'url' | 'mention';
-      start: number;
-      end: number;
-      match: string;
-      data?: any;
-    }
-    
-    const matches: Match[] = [];
-    let match;
-    
-    // Find Matrix.to user links
-    matrixLinkRegex.lastIndex = 0;
-    while ((match = matrixLinkRegex.exec(text)) !== null) {
-      const userId = match[1];
-      const members = currentRoom.getJoinedMembers();
-      const mentionedUser = members.find(member => member.userId === userId);
-      const displayName = mentionedUser?.name || userId.split(':')[0].substring(1);
-      
-      matches.push({
-        type: 'matrixLink',
-        start: match.index,
-        end: match.index + match[0].length,
-        match: match[0],
-        data: { userId, displayName, url: match[0] }
-      });
-    }
-    
-    // Find all other URLs (not Matrix.to user links)
-    urlRegex.lastIndex = 0;
-    while ((match = urlRegex.exec(text)) !== null) {
-      const url = match[0];
-      const matchStart = match.index;
-      const matchEnd = match.index + match[0].length;
-      
-      // Skip if this URL is already a Matrix.to user link
-      const isAlreadyProcessed = matches.some(m => 
-        m.start <= matchStart && m.end >= matchEnd
-      );
-      
-      if (!isAlreadyProcessed) {
-        matches.push({
-          type: 'url',
-          start: matchStart,
-          end: matchEnd,
-          match: url,
-          data: { url }
-        });
-      }
-    }
-    
-    // Find plain @mentions (not in URLs)
-    plainMentionRegex.lastIndex = 0;
-    while ((match = plainMentionRegex.exec(text)) !== null) {
-      const mentionedName = match[1];
-      const matchStart = match.index;
-      const matchEnd = match.index + match[0].length;
-      
-      // Skip if this is inside a URL or Matrix link
-      const isInUrl = matches.some(m => 
-        m.start <= matchStart && m.end >= matchEnd
-      );
-      
-      if (!isInUrl) {
-        const members = currentRoom.getJoinedMembers();
-        const mentionedUser = members.find(member => 
-          member.name === mentionedName || 
-          member.userId === `@${mentionedName}` ||
-          member.userId.toLowerCase().includes(mentionedName.toLowerCase())
-        );
-        
-        if (mentionedUser) {
-          matches.push({
-            type: 'mention',
-            start: matchStart,
-            end: matchEnd,
-            match: match[0],
-            data: { user: mentionedUser }
-          });
-        }
-      }
-    }
-    
-    // Sort matches by position
-    matches.sort((a, b) => a.start - b.start);
-    
-    // Build the result
-    const parts = [];
-    let lastIndex = 0;
-    
-    matches.forEach((m) => {
-      // Add text before this match
-      if (m.start > lastIndex) {
-        parts.push(
-          <span key={`text-${lastIndex}`}>
-            {text.substring(lastIndex, m.start)}
-          </span>
-        );
-      }
-      
-      // Add the match
-      if (m.type === 'matrixLink') {
-        parts.push(
-          <a
-            key={`link-${m.start}`}
-            href={m.data.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition font-medium no-underline"
-            title={m.data.userId}
-            onClick={(e) => e.stopPropagation()}
-          >
-            @{m.data.displayName}
-          </a>
-        );
-      } else if (m.type === 'url') {
-        parts.push(
-          <a
-            key={`url-${m.start}`}
-            href={m.data.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-400 hover:text-blue-300 underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {m.data.url}
-          </a>
-        );
-      } else if (m.type === 'mention') {
-        parts.push(
-          <span
-            key={`mention-${m.start}`}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 transition cursor-pointer font-medium"
-            title={m.data.user.userId}
-            onClick={(e) => {
-              e.stopPropagation();
-              console.log('Clicked user:', m.data.user.userId);
-            }}
-          >
-            @{m.data.user.name}
-          </span>
-        );
-      }
-      
-      lastIndex = m.end;
-    });
-    
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(
-        <span key={`text-${lastIndex}`}>
-          {text.substring(lastIndex)}
-        </span>
-      );
-    }
-    
-    return parts.length > 0 ? parts : text;
+    // Just render as plain text for now - markdown causing zoom issues
+    return <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</span>;
   };
 
   // Element Call detection and joining is now handled by useElementCall hook

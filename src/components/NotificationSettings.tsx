@@ -492,7 +492,7 @@ const NotificationSettings: React.FC = () => {
         </>
       )}
 
-      {!hasPermission && settings.desktop && (
+      {!hasPermission && settings.desktop && isSecureContext && (
         <div
           className="p-3 rounded-lg text-sm"
           style={{
@@ -503,6 +503,38 @@ const NotificationSettings: React.FC = () => {
           <strong>Permission Required:</strong> Click the desktop notifications toggle to grant permission.
         </div>
       )}
+
+      {/* Test Notification Button */}
+      {settings.enabled && hasPermission && settings.desktop && (
+        <button
+          onClick={() => {
+            new Notification('Krypta Test Notification', {
+              body: 'Desktop notifications are working! 🎉',
+              icon: '/vite.svg',
+            });
+          }}
+          className="w-full p-3 rounded-lg text-center transition flex items-center justify-center gap-2"
+          style={{
+            backgroundColor: 'var(--color-success)',
+            color: '#fff',
+          }}
+        >
+          <Bell className="w-5 h-5" />
+          Send Test Notification
+        </button>
+      )}
+
+      {/* Diagnostic Info */}
+      <div className="mt-4 p-3 rounded-lg text-xs space-y-1" style={{ backgroundColor: 'var(--color-bgTertiary)', color: 'var(--color-textMuted)' }}>
+        <div className="font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Diagnostic Info:</div>
+        <div>Secure Context: {isSecureContext ? '✅ Yes' : '❌ No (need HTTPS/localhost)'}</div>
+        <div>Browser Support: {typeof Notification !== 'undefined' ? '✅ Yes' : '❌ No'}</div>
+        <div>Permission Status: {typeof Notification !== 'undefined' ? Notification.permission : 'N/A'}</div>
+        <div>Notifications Enabled: {settings.enabled ? '✅' : '❌'}</div>
+        <div>Desktop Enabled: {settings.desktop ? '✅' : '❌'}</div>
+        <div>Sound Enabled: {settings.sound ? '✅' : '❌'}</div>
+        <div>Current URL: {typeof window !== 'undefined' ? window.location.origin : 'N/A'}</div>
+      </div>
     </div>
   );
 };
