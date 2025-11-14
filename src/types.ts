@@ -33,7 +33,7 @@ export interface MatrixContextType {
   setCurrentRoom: (room: Room | null) => void;
   rooms: Room[];
   spaces: Room[];
-  sendMessage: (roomId: string, message: string, threadRootEventId?: string) => Promise<void>;
+  sendMessage: (roomId: string, message: string, threadRootEventId?: string, forceSend?: boolean) => Promise<void>;
   invites: Room[];
   sendReaction: (roomId: string, eventId: string, emoji: string) => Promise<void>;
   deleteMessage: (roomId: string, eventId: string) => Promise<void>;
@@ -61,6 +61,7 @@ export interface MatrixContextType {
   deleteThemeDefinition: (targetRoomId: string, themeId: string) => Promise<void>;
   acceptInvite: (roomId: string) => Promise<void>;
   declineInvite: (roomId: string) => Promise<void>;
+  setAllowUnverifiedForRoom: (roomId: string, allow: boolean) => void;
 }
 
 export interface Message {

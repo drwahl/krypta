@@ -49,6 +49,12 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [spaceThemeDefaults, setSpaceThemeDefaults] = useState<Record<string, ThemeServerDefault>>({});
   const [themeDefinitions, setThemeDefinitions] = useState<Record<string, Record<string, ThemeDefinition>>>({});
   const isLoggingOutRef = useRef(false); // Track if we're already logging out to prevent duplicate alerts
+  
+  // Track which rooms are allowed to send to unverified devices
+  const [allowUnverifiedDevices, setAllowUnverifiedDevices] = useState<Record<string, boolean>>(() => {
+    const stored = localStorage.getItem('krypta_allow_unverified_devices');
+    return stored ? JSON.parse(stored) : {};
+  });
 
   // Wrapper for setCurrentRoom that also persists to localStorage
   const setCurrentRoom = useCallback((room: Room | null) => {
@@ -274,7 +280,9 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             await restoredClient.initCrypto();
             console.log('✅ Crypto initialized from cache');
             
-            // Note: setGlobalErrorOnUnknownDevices removed in v39+ - handled by new crypto API
+            // Allow sending to unverified devices (we'll handle the check manually)
+            restoredClient.setGlobalErrorOnUnknownDevices(false);
+            console.log('🔐 Configured to allow unverified devices (manual check)');
             
             restoredClient.on('crypto.verification.request' as any, (request: any) => {
               setVerificationRequest(request);
@@ -537,6 +545,10 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await loggedInClient.initCrypto();
         console.log('✅ Legacy crypto initialized');
         
+        // Allow sending to unverified devices (we'll handle the check manually)
+        loggedInClient.setGlobalErrorOnUnknownDevices(false);
+        console.log('🔐 Configured to allow unverified devices (manual check)');
+        
         // Listen for verification requests
         loggedInClient.on('crypto.verification.request' as any, (request: any) => {
           console.log('🔐 Verification request received:', request);
@@ -787,7 +799,16 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  const sendMessage = async (roomId: string, message: string, threadRootEventId?: string) => {
+  const setAllowUnverifiedForRoom = useCallback((roomId: string, allow: boolean) => {
+    setAllowUnverifiedDevices(prev => {
+      const updated = { ...prev, [roomId]: allow };
+      localStorage.setItem('krypta_allow_unverified_devices', JSON.stringify(updated));
+      console.log(`🔐 ${allow ? 'Allowing' : 'Disallowing'} unverified devices for room: ${roomId}`);
+      return updated;
+    });
+  }, []);
+
+  const sendMessage = async (roomId: string, message: string, threadRootEventId?: string, forceSend?: boolean) => {
     if (!client) return;
     
     // Convert @mentions to Matrix.to links for proper protocol support
@@ -862,7 +883,75 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.log(`📨 Sending message as thread reply to: ${threadRootEventId}`);
     }
 
-    await client.sendEvent(roomId, 'm.room.message', content);
+    try {
+      console.log('📤 Sending message to room:', roomId);
+      
+      // Check if room is encrypted
+      const isEncrypted = client.isRoomEncrypted(roomId);
+      console.log('🔐 Room encrypted:', isEncrypted);
+      
+      // Check if this room is allowed to send to unverified devices, or if forceSend is true
+      const allowUnverified = allowUnverifiedDevices[roomId] === true || forceSend === true;
+      
+      // If encrypted and we don't have permission, check for unverified devices FIRST
+      if (isEncrypted && !allowUnverified) {
+        console.log('🔐 Checking for unverified devices before sending...');
+        
+        // Get all members in the room
+        const room = client.getRoom(roomId);
+        if (room) {
+          const members = room.getJoinedMembers();
+          let hasUnverifiedDevices = false;
+          
+          // Check each member's devices
+          for (const member of members) {
+            const userId = member.userId;
+            
+            try {
+              // Get device verification status from crypto
+              const devicesInRoom = await client.getStoredDevicesForUser(userId);
+              
+              for (const device of devicesInRoom) {
+                const verified = client.checkDeviceTrust(userId, device.deviceId);
+                
+                if (!verified.isVerified()) {
+                  console.log(`🔐 Found unverified device: ${userId} / ${device.deviceId}`);
+                  hasUnverifiedDevices = true;
+                  break;
+                }
+              }
+              
+              if (hasUnverifiedDevices) break;
+            } catch (err) {
+              console.warn(`Could not check devices for ${userId}:`, err);
+              // If we can't check, assume there might be unverified devices
+              hasUnverifiedDevices = true;
+              break;
+            }
+          }
+          
+          if (hasUnverifiedDevices) {
+            console.log('🔐 Blocking send due to unverified devices');
+            const unverifiedError = new Error('UNVERIFIED_DEVICES');
+            (unverifiedError as any).roomId = roomId;
+            throw unverifiedError;
+          }
+        }
+      }
+      
+      if (forceSend) {
+        console.log('🔓 Force-sending message (one-time bypass)');
+      } else if (allowUnverifiedDevices[roomId]) {
+        console.log('🔓 Room allows sending to unverified devices (permanent setting)');
+      }
+      
+      // Send the message (encryption happens automatically if room is encrypted)
+      const result = await client.sendEvent(roomId, 'm.room.message', content);
+      console.log('✅ Message sent successfully:', result.event_id);
+    } catch (error: any) {
+      console.error('❌ Failed to send message:', error);
+      throw error; // Re-throw as-is (including our custom UNVERIFIED_DEVICES error)
+    }
   };
 
   const sendReaction = async (roomId: string, eventId: string, emoji: string) => {
@@ -1126,6 +1215,10 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.log('🔐 Initializing legacy crypto (v34, restored session)...');
             await restoredClient.initCrypto();
             console.log('✅ Legacy crypto initialized (restored session)');
+            
+            // Allow sending to unverified devices (we'll handle the check manually)
+            restoredClient.setGlobalErrorOnUnknownDevices(false);
+            console.log('🔐 Configured to allow unverified devices (manual check)');
             
             // Listen for verification requests
             restoredClient.on('crypto.verification.request' as any, (request: any) => {
@@ -1465,6 +1558,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     deleteThemeDefinition,
     acceptInvite,
     declineInvite,
+    setAllowUnverifiedForRoom,
   }), [
     client,
     isLoggedIn,
@@ -1497,6 +1591,7 @@ export const MatrixProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     deleteThemeDefinition,
     acceptInvite,
     declineInvite,
+    setAllowUnverifiedForRoom,
   ]);
 
   return <MatrixContext.Provider value={value}>{children}</MatrixContext.Provider>;

@@ -37,6 +37,13 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [hasPermission, setHasPermission] = useState(
     typeof Notification !== 'undefined' && Notification.permission === 'granted'
   );
+  
+  // Track whether the initial sync is complete
+  const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(false);
+  
+  // Debouncing for notification sounds - only play once per second max
+  const lastSoundPlayTimeRef = React.useRef<number>(0);
+  const soundDebounceMs = 1000; // 1 second between sounds
 
   const [settings, setSettings] = useState<NotificationSettings>(() => {
     const stored = localStorage.getItem('krypta_notification_settings');
@@ -73,6 +80,14 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   // Audio notification sound
   const playNotificationSound = useCallback(() => {
     if (!settings.sound || settings.volume === 0) return;
+
+    // Debounce: Don't play sound if we just played one recently
+    const now = Date.now();
+    if (now - lastSoundPlayTimeRef.current < soundDebounceMs) {
+      console.log('🔇 Notification sound debounced (too soon after last sound)');
+      return;
+    }
+    lastSoundPlayTimeRef.current = now;
 
     // Custom sound file
     if (settings.soundType === 'custom' && settings.customSoundUrl) {
@@ -325,11 +340,47 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     });
   }, []);
 
+  // Track when initial sync is complete
+  useEffect(() => {
+    if (!client) {
+      // Reset when client is gone (logout)
+      setIsInitialSyncComplete(false);
+      return;
+    }
+
+    // Reset for new client session
+    setIsInitialSyncComplete(false);
+
+    const handleSync = (state: string) => {
+      console.log('🔄 Sync state changed:', state);
+      
+      // PREPARED = initial sync complete, SYNCING = subsequent syncs
+      if (state === 'PREPARED' || state === 'SYNCING') {
+        if (!isInitialSyncComplete) {
+          console.log('✅ Initial sync complete, notifications now active');
+          setIsInitialSyncComplete(true);
+        }
+      }
+    };
+
+    client.on('sync' as any, handleSync);
+
+    return () => {
+      client.removeListener('sync' as any, handleSync);
+    };
+  }, [client, isInitialSyncComplete]);
+
   // Listen for new messages
   useEffect(() => {
     if (!client || !settings.enabled) return;
 
     const handleTimeline = (event: MatrixEvent) => {
+      // Don't notify until initial sync is complete
+      if (!isInitialSyncComplete) {
+        console.log('🔇 Skipping notification (initial sync not complete)');
+        return;
+      }
+
       const eventType = event.getType();
       if (eventType !== 'm.room.message' && eventType !== 'm.sticker') return;
 
@@ -384,7 +435,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     return () => {
       client.removeListener('Room.timeline' as any, handleTimeline);
     };
-  }, [client, settings, currentRoom, showDesktopNotification, playNotificationSound, shouldNotifyForRoom]);
+  }, [client, settings, currentRoom, showDesktopNotification, playNotificationSound, shouldNotifyForRoom, isInitialSyncComplete]);
 
   // Auto-request permission on first load if enabled
   useEffect(() => {

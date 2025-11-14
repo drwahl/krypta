@@ -16,7 +16,7 @@ interface MessageInputProps {
 }
 
 const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
-  const { currentRoom: contextRoom, sendMessage, client } = useMatrix();
+  const { currentRoom: contextRoom, sendMessage, client, setAllowUnverifiedForRoom } = useMatrix();
   const { theme } = useTheme();
   
   // Use prop if provided, otherwise fall back to context
@@ -27,6 +27,8 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentionStart, setMentionStart] = useState<number>(-1);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showUnverifiedDialog, setShowUnverifiedDialog] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<number>();
   const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -253,9 +255,11 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
     if (!message.trim() || !currentRoom) return;
 
     try {
+      console.log('💬 MessageInput: Attempting to send message');
       // Convert emoji shortcodes to actual emoji before sending
       const messageWithEmoji = convertShortcodes(message);
       await sendMessage(currentRoom.roomId, messageWithEmoji);
+      console.log('💬 MessageInput: Message sent, clearing input');
       setMessage('');
       
       // Stop typing indicator
@@ -267,9 +271,62 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
-    } catch (error) {
-      console.error('Failed to send message:', error);
+    } catch (error: any) {
+      console.error('💬 MessageInput: Failed to send message:', error);
+      
+      // Check if this is an unverified devices error
+      if (error?.message === 'UNVERIFIED_DEVICES') {
+        console.log('🔐 Unverified devices detected, showing dialog');
+        setPendingMessage(message);
+        setMessage(''); // Clear input immediately to prevent accidental double-send
+        setShowUnverifiedDialog(true);
+        return;
+      }
+      
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  };
+
+  const handleSendAnyway = async (alwaysAllow: boolean) => {
+    if (!currentRoom || !pendingMessage) return;
+
+    if (alwaysAllow) {
+      // Remember this choice for this room (for future messages)
+      setAllowUnverifiedForRoom(currentRoom.roomId, true);
+    }
+
+    // Retry sending the message (always use forceSend for this retry)
+    try {
+      const messageWithEmoji = convertShortcodes(pendingMessage);
+      // Always force send when retrying from dialog (state update takes effect for future sends)
+      await sendMessage(currentRoom.roomId, messageWithEmoji, undefined, true);
+      console.log('✅ Message sent after allowing unverified devices');
+      setPendingMessage('');
+      setShowUnverifiedDialog(false);
+      
+      // Stop typing indicator
+      if (client) {
+        client.sendTyping(currentRoom.roomId, false, 0);
+        setIsTyping(false);
+      }
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    } catch (error) {
+      console.error('❌ Failed to send message even after allowing unverified:', error);
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setShowUnverifiedDialog(false);
+    }
+  };
+
+  const handleCancelSend = () => {
+    // Restore the message to the input so user doesn't lose it
+    if (pendingMessage) {
+      setMessage(pendingMessage);
+    }
+    setPendingMessage('');
+    setShowUnverifiedDialog(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -586,6 +643,92 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
           }}
         >
           <span className="font-medium">@username</span> to mention • <span className="font-medium">:emoji:</span> for emoji (e.g. :laughing: :heart: :fire:) • <span className="font-medium">Tab</span> to autocomplete • <span className="font-medium">Enter</span> to send
+        </div>
+      )}
+
+      {/* Unverified devices dialog */}
+      {showUnverifiedDialog && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
+          onClick={handleCancelSend}
+        >
+          <div 
+            className="p-6 rounded-lg shadow-xl max-w-md w-full mx-4"
+            style={{
+              backgroundColor: 'var(--color-bgSecondary)',
+              border: '1px solid var(--color-border)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 
+              className="text-lg font-semibold mb-3"
+              style={{ color: 'var(--color-text)' }}
+            >
+              Unverified Devices
+            </h3>
+            <p 
+              className="mb-4"
+              style={{ 
+                color: 'var(--color-textSecondary)',
+                fontSize: 'var(--sizing-textSm)',
+              }}
+            >
+              This room contains unverified devices. Messages sent to unverified devices may not be secure. Do you want to send your message anyway?
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => handleSendAnyway(false)}
+                className="w-full py-2 px-4 rounded transition"
+                style={{
+                  backgroundColor: 'var(--color-warning)',
+                  color: '#fff',
+                  fontSize: 'var(--sizing-textSm)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = '0.8';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = '1';
+                }}
+              >
+                Send Anyway (Once)
+              </button>
+              <button
+                onClick={() => handleSendAnyway(true)}
+                className="w-full py-2 px-4 rounded transition"
+                style={{
+                  backgroundColor: 'var(--color-error)',
+                  color: '#fff',
+                  fontSize: 'var(--sizing-textSm)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = '0.8';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = '1';
+                }}
+              >
+                Always Send to Unverified Devices in this Room
+              </button>
+              <button
+                onClick={handleCancelSend}
+                className="w-full py-2 px-4 rounded transition"
+                style={{
+                  backgroundColor: 'var(--color-bgTertiary)',
+                  color: 'var(--color-text)',
+                  fontSize: 'var(--sizing-textSm)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--color-bgTertiary)';
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
