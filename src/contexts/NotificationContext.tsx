@@ -38,7 +38,8 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     typeof Notification !== 'undefined' && Notification.permission === 'granted'
   );
   
-  // Track whether the initial sync is complete
+  // Track whether the initial sync is complete - use ref so it persists
+  const isInitialSyncCompleteRef = React.useRef(false);
   const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(false);
   
   // Debouncing for notification sounds - only play once per second max
@@ -79,7 +80,17 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
 
   // Audio notification sound
   const playNotificationSound = useCallback(() => {
-    if (!settings.sound || settings.volume === 0) return;
+    console.log('🔊 playNotificationSound called', { sound: settings.sound, volume: settings.volume });
+    
+    if (!settings.sound) {
+      console.log('🔇 Sound notifications disabled');
+      return;
+    }
+    
+    if (settings.volume === 0) {
+      console.log('🔇 Volume is 0');
+      return;
+    }
 
     // Debounce: Don't play sound if we just played one recently
     const now = Date.now();
@@ -88,6 +99,8 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
       return;
     }
     lastSoundPlayTimeRef.current = now;
+    
+    console.log('🔊 Playing notification sound:', settings.soundType);
 
     // Custom sound file
     if (settings.soundType === 'custom' && settings.customSoundUrl) {
@@ -344,22 +357,24 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   useEffect(() => {
     if (!client) {
       // Reset when client is gone (logout)
+      isInitialSyncCompleteRef.current = false;
       setIsInitialSyncComplete(false);
       return;
     }
 
     // Reset for new client session
+    isInitialSyncCompleteRef.current = false;
     setIsInitialSyncComplete(false);
 
     const handleSync = (state: string) => {
       console.log('🔄 Sync state changed:', state);
       
       // PREPARED = initial sync complete, SYNCING = subsequent syncs
-      if (state === 'PREPARED' || state === 'SYNCING') {
-        if (!isInitialSyncComplete) {
-          console.log('✅ Initial sync complete, notifications now active');
-          setIsInitialSyncComplete(true);
-        }
+      // Only mark complete once using the ref to avoid multiple triggers
+      if ((state === 'PREPARED' || state === 'SYNCING') && !isInitialSyncCompleteRef.current) {
+        console.log('✅ Initial sync complete, notifications now active');
+        isInitialSyncCompleteRef.current = true;
+        setIsInitialSyncComplete(true);
       }
     };
 
@@ -368,13 +383,26 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     return () => {
       client.removeListener('sync' as any, handleSync);
     };
-  }, [client, isInitialSyncComplete]);
+  }, [client]);
 
   // Listen for new messages
   useEffect(() => {
     if (!client || !settings.enabled) return;
 
-    const handleTimeline = (event: MatrixEvent) => {
+    const handleTimeline = (event: MatrixEvent, room: any, toStartOfTimeline: boolean) => {
+      console.log('📨 Timeline event received:', {
+        type: event.getType(),
+        toStartOfTimeline,
+        roomId: room?.roomId,
+        sender: event.getSender()
+      });
+
+      // Don't process historical messages
+      if (toStartOfTimeline) {
+        console.log('🔇 Skipping: Historical message');
+        return;
+      }
+
       // Don't notify until initial sync is complete
       if (!isInitialSyncComplete) {
         console.log('🔇 Skipping notification (initial sync not complete)');
@@ -382,22 +410,36 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
       }
 
       const eventType = event.getType();
-      if (eventType !== 'm.room.message' && eventType !== 'm.sticker') return;
+      if (eventType !== 'm.room.message' && eventType !== 'm.sticker') {
+        console.log('🔇 Skipping: Not a message event');
+        return;
+      }
 
       const sender = event.getSender();
       const currentUserId = client.getUserId();
       
       // Don't notify for own messages
-      if (sender === currentUserId) return;
+      if (sender === currentUserId) {
+        console.log('🔇 Skipping: Own message');
+        return;
+      }
 
-      const room = client.getRoom(event.getRoomId());
-      if (!room) return;
+      if (!room) {
+        console.log('🔇 Skipping: No room');
+        return;
+      }
 
       // Don't notify if this is the active room
-      if (currentRoom && currentRoom.roomId === room.roomId) return;
+      if (currentRoom && currentRoom.roomId === room.roomId) {
+        console.log('🔇 Skipping: Active room');
+        return;
+      }
 
       // Check if this room should send notifications
-      if (!shouldNotifyForRoom(room.roomId)) return;
+      if (!shouldNotifyForRoom(room.roomId)) {
+        console.log('🔇 Skipping: Room notifications disabled');
+        return;
+      }
 
       const content = event.getContent();
       const body = content.body || '';
@@ -411,9 +453,14 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
         // Only notify on mentions
         const mentionPattern = new RegExp(`@${currentUserId}|@room|@everyone`, 'i');
         shouldNotify = mentionPattern.test(body);
+        if (!shouldNotify) {
+          console.log('🔇 Skipping: Mentions only mode, no mention found');
+          return;
+        }
       }
 
-      if (!shouldNotify) return;
+      console.log('🔔 Triggering notification for:', roomName, body.substring(0, 30));
+      console.log('🔔 Settings:', { desktop: settings.desktop, sound: settings.sound });
 
       // Show notification
       if (settings.desktop) {
@@ -426,7 +473,10 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
 
       // Play sound
       if (settings.sound) {
+        console.log('🔊 Calling playNotificationSound...');
         playNotificationSound();
+      } else {
+        console.log('🔇 Sound disabled in settings');
       }
     };
 
