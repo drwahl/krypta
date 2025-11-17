@@ -18,6 +18,8 @@ const RoomPaneComponent: React.FC<RoomPaneProps> = ({ room, isActive }) => {
   const { removeRoom, setActiveRoom, openRooms, layoutDirection } = useMultiRoom();
   const { theme: globalTheme, setCurrentRoom: setThemeCurrentRoom, getRoomThemeObject } = useTheme();
   const [showInfo, setShowInfo] = useState(false);
+  const [replyText, setReplyText] = useState<string>('');
+  const [editingEvent, setEditingEvent] = useState<{ eventId: string; originalText: string } | null>(null);
   
   // Get the specific theme for this room (respecting hierarchy)
   const spaceId = getParentSpace(room.roomId);
@@ -202,8 +204,18 @@ const RoomPaneComponent: React.FC<RoomPaneProps> = ({ room, isActive }) => {
           />
         )}
         
-        <MessageTimeline room={room} isActive={isActive} />
-        <MessageInput room={room} isActive={isActive} />
+        <MessageTimeline 
+          room={room} 
+          onReply={setReplyText}
+          onEdit={setEditingEvent}
+        />
+        <MessageInput 
+          room={room} 
+          replyText={replyText}
+          onReplyTextUsed={() => setReplyText('')}
+          editingEvent={editingEvent}
+          onEditComplete={() => setEditingEvent(null)}
+        />
       </div>
       
       {/* Room Info Panel */}

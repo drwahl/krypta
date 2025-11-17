@@ -2,12 +2,13 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { useMultiRoom } from '../contexts/MultiRoomContext';
-import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical, Settings as SettingsIcon, Bell, BellOff, Plus } from 'lucide-react';
+import { Search, Hash, Users, LogOut, MessageCircle, ChevronDown, ChevronRight, Home, Lock, GripVertical, Settings as SettingsIcon, Bell, BellOff, Plus, Mail } from 'lucide-react';
 import { Room, MatrixClient } from 'matrix-js-sdk';
 import { getRoomAvatarUrl, getRoomInitials } from '../utils/roomIcons';
 import Settings from './Settings';
 import Invites from './Invites';
 import CreateRoom from './CreateRoom';
+import StartDM from './StartDM';
 import { SortMode } from './SortSelector';
 import { Theme } from '../themeTypes';
 
@@ -210,6 +211,7 @@ const RoomListComponent: React.FC = () => {
   
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [showStartDM, setShowStartDM] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; spaceId: string } | null>(null);
   const [createRoomInSpace, setCreateRoomInSpace] = useState<string | null>(null);
   
@@ -547,6 +549,26 @@ const RoomListComponent: React.FC = () => {
               title="Create Room"
             >
               <Plus style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
+            </button>
+            <button
+              onClick={() => setShowStartDM(true)}
+              className="transition"
+              style={{
+                padding: theme.style.compactMode ? '0.25rem' : '0.5rem',
+                borderRadius: 'var(--sizing-borderRadius)',
+                color: 'var(--color-textMuted)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-hover)';
+                e.currentTarget.style.color = 'var(--color-text)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--color-textMuted)';
+              }}
+              title="Start Conversation"
+            >
+              <Mail style={{ width: theme.style.compactMode ? '0.875rem' : '1.25rem', height: theme.style.compactMode ? '0.875rem' : '1.25rem' }} />
             </button>
           <button
             onClick={logout}
@@ -1104,6 +1126,21 @@ const RoomListComponent: React.FC = () => {
             setCreateRoomInSpace(null);
           }}
           parentSpaceId={createRoomInSpace || undefined}
+        />
+      )}
+
+      {/* Start DM Modal */}
+      {showStartDM && (
+        <StartDM
+          onClose={() => setShowStartDM(false)}
+          onRoomCreated={(roomId) => {
+            // Open the newly created DM
+            const newRoom = rooms.find(r => r.roomId === roomId);
+            if (newRoom) {
+              addRoom(newRoom);
+            }
+            setShowStartDM(false);
+          }}
         />
       )}
     </div>

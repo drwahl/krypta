@@ -2,15 +2,18 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useMatrix } from '../MatrixContext';
 import { useTheme } from '../ThemeContext';
 import { format } from 'date-fns';
-import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin, MessageSquare } from 'lucide-react';
+import { Smile, Lock, ShieldAlert, Upload, Video, Trash2, X, Pin, MessageSquare, Reply, Copy, Forward, Code, MoreVertical, Edit } from 'lucide-react';
 import { MatrixEvent, Room, MatrixClient } from 'matrix-js-sdk';
 import UrlPreview from './UrlPreview';
 import { useElementCall } from '../hooks/useElementCall';
 import { useThreads } from '../contexts/ThreadsContext';
 import MessageMetadataModal from './MessageMetadataModal';
+import ForwardMessage from './ForwardMessage';
 
 interface MessageTimelineProps {
   room?: Room; // Optional room prop for multi-pane support
+  onReply?: (text: string) => void; // Callback for reply text
+  onEdit?: (event: { eventId: string; originalText: string }) => void; // Callback for edit
 }
 
 // Generate consistent color from username using simple hash
@@ -217,7 +220,7 @@ const extractUrls = (text: string): string[] => {
   return matches || [];
 };
 
-const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => {
+const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp, onReply, onEdit }) => {
   const { currentRoom: contextRoom, client, sendReaction, deleteMessage, loadMoreHistory } = useMatrix();
   const { theme } = useTheme();
   const { threads, setSelectedThread } = useThreads();
@@ -234,6 +237,8 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedMessageEvent, setSelectedMessageEvent] = useState<MatrixEvent | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; event: MatrixEvent } | null>(null);
+  const [forwardingEvent, setForwardingEvent] = useState<MatrixEvent | null>(null);
   
   // Element Call integration via hook
   const {
@@ -730,6 +735,86 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
     }
   };
 
+  // Context menu handlers
+  const handleContextMenu = (e: React.MouseEvent, event: MatrixEvent) => {
+    e.preventDefault();
+    
+    // Calculate smart positioning to avoid overflow
+    const menuWidth = 200;
+    const menuHeight = 400; // Approximate max height
+    const padding = 10;
+    
+    let x = e.clientX;
+    let y = e.clientY;
+    
+    // Check if menu would overflow right edge
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - padding;
+    }
+    
+    // Check if menu would overflow bottom edge
+    if (y + menuHeight > window.innerHeight) {
+      y = e.clientY - menuHeight; // Position above cursor
+      // Make sure it doesn't overflow top
+      if (y < padding) {
+        y = padding;
+      }
+    }
+    
+    setContextMenu({ x, y, event });
+  };
+
+  const handleReplyToMessage = (event: MatrixEvent) => {
+    const content = event.getContent();
+    const sender = event.getSender();
+    const senderName = sender ? currentRoom?.getMember(sender)?.name || sender : 'Unknown';
+    const body = content.body || '';
+    
+    // Create a quoted reply format
+    const quotedText = `> ${senderName} said:\n> ${body.split('\n').join('\n> ')}\n\n`;
+    
+    if (onReply) onReply(quotedText);
+    setContextMenu(null);
+  };
+
+  const handleEditMessage = (event: MatrixEvent) => {
+    const content = event.getContent();
+    const body = content.body || '';
+    const eventId = event.getId();
+    
+    if (eventId && onEdit) {
+      onEdit({ eventId, originalText: body });
+      setContextMenu(null);
+    }
+  };
+
+  const handleCopyMessage = (event: MatrixEvent) => {
+    const content = event.getContent();
+    const body = content.body || '';
+    navigator.clipboard.writeText(body);
+    setContextMenu(null);
+  };
+
+  const handleCopyMessageLink = (event: MatrixEvent) => {
+    const eventId = event.getId();
+    if (!eventId || !currentRoom) return;
+    
+    // Create a Matrix permalink
+    const roomId = currentRoom.roomId;
+    const link = `https://matrix.to/#/${roomId}/${eventId}`;
+    navigator.clipboard.writeText(link);
+    setContextMenu(null);
+  };
+
+  // Close context menu on outside click
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    if (contextMenu) {
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [contextMenu]);
+
   const getReactions = (event: MatrixEvent) => {
     if (!currentRoom) return {};
     
@@ -932,8 +1017,8 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                 <div
                   key={eventId}
                   data-event-id={eventId}
-                  className="group cursor-pointer hover:bg-slate-800/30 transition-colors"
-                  onClick={() => setSelectedMessageEvent(event)}
+                  className="group hover:bg-slate-800/30 transition-colors"
+                  onContextMenu={(e) => handleContextMenu(e, event)}
                   style={{
                     padding: 'var(--spacing-messagePadding)',
                     marginBottom: 'var(--spacing-messageGap)',
@@ -1343,8 +1428,8 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
               <div
                 key={eventId}
                 data-event-id={eventId}
-                className="group cursor-pointer hover:bg-slate-800/30 transition-colors rounded-lg px-4 py-2 relative"
-                onClick={() => setSelectedMessageEvent(event)}
+                className="group hover:bg-slate-800/30 transition-colors rounded-lg px-4 py-2 relative"
+                onContextMenu={(e) => handleContextMenu(e, event)}
               >
                 <div className="flex items-start gap-3 w-full pr-24">
                   {/* Action buttons - positioned absolutely on the right */}
@@ -1454,9 +1539,8 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
                             ))}
                             
                             {isEncrypted && (
-                              <div className="flex items-center gap-1 mt-1 text-xs opacity-50">
+                              <div className="flex items-center mt-1 text-xs opacity-50" title="Encrypted message">
                                 <Lock className="w-3 h-3" />
-                                <span>Encrypted</span>
                               </div>
                             )}
                           </>
@@ -1712,6 +1796,141 @@ const MessageTimeline: React.FC<MessageTimelineProps> = ({ room: roomProp }) => 
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 min-w-[200px]"
+          style={{
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Reply */}
+          <button
+            onClick={() => handleReplyToMessage(contextMenu.event)}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Reply className="w-4 h-4" />
+            <span>Reply</span>
+          </button>
+
+          {/* React */}
+          <button
+            onClick={() => {
+              const eventId = contextMenu.event.getId();
+              if (eventId) {
+                setShowEmojiPicker(eventId);
+                setSelectedCategory('Smileys');
+              }
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Smile className="w-4 h-4" />
+            <span>React</span>
+          </button>
+
+          {/* Forward */}
+          <button
+            onClick={() => {
+              setForwardingEvent(contextMenu.event);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Forward className="w-4 h-4" />
+            <span>Forward</span>
+          </button>
+
+          <div className="border-t border-slate-700 my-1" />
+
+          {/* Edit (only for own messages) */}
+          {contextMenu.event.getSender() === client?.getUserId() && (
+            <button
+              onClick={() => handleEditMessage(contextMenu.event)}
+              className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+            >
+              <Edit className="w-4 h-4" />
+              <span>Edit</span>
+            </button>
+          )}
+
+          {/* Copy Text */}
+          <button
+            onClick={() => handleCopyMessage(contextMenu.event)}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Copy className="w-4 h-4" />
+            <span>Copy Text</span>
+          </button>
+
+          {/* Copy Link */}
+          <button
+            onClick={() => handleCopyMessageLink(contextMenu.event)}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Copy className="w-4 h-4" />
+            <span>Copy Link</span>
+          </button>
+
+          <div className="border-t border-slate-700 my-1" />
+
+          {/* View Source */}
+          <button
+            onClick={() => {
+              setSelectedMessageEvent(contextMenu.event);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Code className="w-4 h-4" />
+            <span>View Source</span>
+          </button>
+
+          {/* Pin Message */}
+          <button
+            onClick={() => {
+              const eventId = contextMenu.event.getId();
+              if (eventId) handlePinMessage(eventId);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-700 transition text-white text-left"
+          >
+            <Pin className="w-4 h-4" />
+            <span>Pin Message</span>
+          </button>
+
+          {/* Delete (only for own messages) */}
+          {contextMenu.event.getSender() === client?.getUserId() && (
+            <>
+              <div className="border-t border-slate-700 my-1" />
+              <button
+                onClick={() => {
+                  const eventId = contextMenu.event.getId();
+                  if (eventId && window.confirm('Delete this message?')) {
+                    handleDeleteMessage(eventId);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-red-900/50 transition text-red-400 text-left"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Forward Modal */}
+      {forwardingEvent && (
+        <ForwardMessage
+          event={forwardingEvent}
+          onClose={() => setForwardingEvent(null)}
+        />
+      )}
 
       {/* Message Metadata Modal */}
       <MessageMetadataModal

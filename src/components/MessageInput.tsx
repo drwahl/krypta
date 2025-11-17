@@ -13,9 +13,19 @@ interface UserSuggestion {
 
 interface MessageInputProps {
   room?: Room; // Optional room prop for multi-pane support
+  replyText?: string; // Text to prepopulate (for replies)
+  onReplyTextUsed?: () => void; // Callback when reply text is used
+  editingEvent?: { eventId: string; originalText: string } | null; // Event being edited
+  onEditComplete?: () => void; // Callback when edit is complete
 }
 
-const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
+const MessageInput: React.FC<MessageInputProps> = ({ 
+  room: roomProp, 
+  replyText, 
+  onReplyTextUsed,
+  editingEvent,
+  onEditComplete 
+}) => {
   const { currentRoom: contextRoom, sendMessage, client, setAllowUnverifiedForRoom } = useMatrix();
   const { theme } = useTheme();
   
@@ -40,6 +50,25 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [message]);
+
+  // Handle reply text
+  useEffect(() => {
+    if (replyText) {
+      setMessage(replyText);
+      textareaRef.current?.focus();
+      if (onReplyTextUsed) {
+        onReplyTextUsed();
+      }
+    }
+  }, [replyText, onReplyTextUsed]);
+
+  // Handle editing
+  useEffect(() => {
+    if (editingEvent) {
+      setMessage(editingEvent.originalText);
+      textareaRef.current?.focus();
+    }
+  }, [editingEvent]);
 
   // Close emoji picker when clicking outside
   useEffect(() => {
@@ -255,6 +284,32 @@ const MessageInput: React.FC<MessageInputProps> = ({ room: roomProp }) => {
     if (!message.trim() || !currentRoom) return;
 
     try {
+      // Handle editing
+      if (editingEvent && client) {
+        console.log('✏️ MessageInput: Editing message');
+        const messageWithEmoji = convertShortcodes(message);
+        
+        await client.sendEvent(currentRoom.roomId, 'm.room.message' as any, {
+          'msgtype': 'm.text',
+          'body': `* ${messageWithEmoji}`,
+          'format': 'org.matrix.custom.html',
+          'formatted_body': `* ${messageWithEmoji}`,
+          'm.new_content': {
+            'msgtype': 'm.text',
+            'body': messageWithEmoji,
+          },
+          'm.relates_to': {
+            'rel_type': 'm.replace',
+            'event_id': editingEvent.eventId,
+          },
+        });
+        
+        console.log('✅ MessageInput: Message edited');
+        setMessage('');
+        if (onEditComplete) onEditComplete();
+        return;
+      }
+
       console.log('💬 MessageInput: Attempting to send message');
       // Convert emoji shortcodes to actual emoji before sending
       const messageWithEmoji = convertShortcodes(message);
